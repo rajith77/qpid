@@ -49,17 +49,18 @@ import org.apache.qpid.configuration.ClientProperties;
 import org.apache.qpid.jms.BrokerDetails;
 import org.apache.qpid.jms.ConnectionURL;
 import org.apache.qpid.properties.ConnectionStartProperties;
-import org.apache.qpid.transport.ConnectionCloseCode;
 import org.apache.qpid.transport.ConnectionException;
 import org.apache.qpid.transport.ConnectionListener;
 import org.apache.qpid.transport.ConnectionSettings;
+import org.apache.qpid.transport.MessageTransfer;
 import org.apache.qpid.transport.ProtocolVersionException;
 import org.apache.qpid.transport.SessionDetachCode;
 import org.apache.qpid.transport.SessionException;
+import org.apache.qpid.transport.SessionListener;
 import org.apache.qpid.transport.util.Logger;
 import org.apache.qpid.util.ExceptionHelper;
 
-public class ConnectionImpl implements Connection, TopicConnection, QueueConnection, ConnectionListener
+public class ConnectionImpl implements Connection, TopicConnection, QueueConnection, ConnectionListener, SessionListener
 {
     private static final Logger _logger = Logger.get(ConnectionImpl.class);
 
@@ -88,17 +89,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     {
         _url = url;
         _amqpConnection = new org.apache.qpid.transport.Connection();
-        _amqpConnection.addConnectionListener(this);
-        ConnectionSettings conSettings = retrieveConnectionSettings(url.getBrokerDetails(0));
-        connect(conSettings);
-        try
-        {
-            verifyClientID();
-        } catch (InvalidClientIDException e)
-        {
-            _amqpConnection.close();
-            throw e;
-        }
+        _amqpConnection.addConnectionListener(this);              
     }
 
     private void connect(ConnectionSettings conSettings) throws JMSException
@@ -119,20 +110,27 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
                     _amqpConnection.setConnectionDelegate(new ClientConnectionDelegate(conSettings, _url));
                     _amqpConnection.connect(conSettings);
-                } catch (ProtocolVersionException pe)
+                }
+                catch (ProtocolVersionException pe)
                 {
                     throw ExceptionHelper.toJMSException("Invalid Protocol Version", pe);
-                } catch (ConnectionException ce)
-                {
-                    String code = ConnectionCloseCode.NORMAL.name();
-                    if (ce.getClose() != null && ce.getClose().getReplyCode() != null)
-                    {
-                        code = ce.getClose().getReplyCode().name();
-                    }
+                }
+                catch (ConnectionException ce)
+                {                    
                     String msg = "Cannot connect to broker: " + ce.getMessage();
-                    throw ExceptionHelper.toJMSException(msg, code, ce);
+                    throw ExceptionHelper.toJMSException(msg, ce);
                 }
             }
+        }
+
+        try
+        {
+            verifyClientID();
+        }
+        catch (InvalidClientIDException e)
+        {
+            _amqpConnection.close();
+            throw e;
         }
     }
 
@@ -163,31 +161,37 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     @Override
     public Session createSession(boolean transacted, int acknowledgeMode) throws JMSException
     {
-        int ackMode = transacted ? Session.SESSION_TRANSACTED :acknowledgeMode;
+        int ackMode = transacted ? Session.SESSION_TRANSACTED : acknowledgeMode;
         return createSession(ackMode);
     }
 
     @Override
     public QueueSession createQueueSession(boolean transacted, int acknowledgeMode) throws JMSException
     {
-        int ackMode = transacted ? Session.SESSION_TRANSACTED :acknowledgeMode;
+        int ackMode = transacted ? Session.SESSION_TRANSACTED : acknowledgeMode;
         return createSession(ackMode);
     }
 
     @Override
     public TopicSession createTopicSession(boolean transacted, int acknowledgeMode) throws JMSException
     {
-        int ackMode = transacted ? Session.SESSION_TRANSACTED :acknowledgeMode;
+        int ackMode = transacted ? Session.SESSION_TRANSACTED : acknowledgeMode;
         return createSession(ackMode);
     }
 
     private SessionImpl createSession(int ackMode) throws JMSException
     {
+        checkClosed();
+        if(_state == State.UNCONNECTED)
+        {
+            ConnectionSettings conSettings = retrieveConnectionSettings(_url.getBrokerDetails(0));
+            connect(conSettings);
+        }
         SessionImpl ssn = new SessionImpl(this, ackMode);
         _sessions.add(ssn);
         return ssn;
     }
-    
+
     @Override
     public String getClientID() throws JMSException
     {
@@ -233,7 +237,8 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
             if (_state == State.UNCONNECTED)
             {
-                connect();
+                ConnectionSettings conSettings = retrieveConnectionSettings(_url.getBrokerDetails(0));
+                connect(conSettings);  
                 _state = State.STARTED;
             }
 
@@ -263,7 +268,8 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 {
                     session.stop();
                 }
-            } else if (state == State.UNCONNECTED)
+            }
+            else if (_state == State.UNCONNECTED)
             {
                 _state = State.STOPPED;
             }
@@ -272,6 +278,9 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         }
     }
 
+    // ----------------------------------------
+    // SessionListener
+    // -----------------------------------------
     @Override
     public void opened(org.apache.qpid.transport.Connection connection)
     {
@@ -292,6 +301,53 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         // TODO Auto-generated method stub
     }
 
+    protected org.apache.qpid.transport.Connection getAMQPConnection()
+    {
+        return _amqpConnection;
+    }
+
+    protected void removeSession(SessionImpl ssn)
+    {
+        _sessions.remove(ssn);
+    }
+
+    // ----------------------------------------
+    // SessionListener
+    // -----------------------------------------
+    @Override
+    public void opened(org.apache.qpid.transport.Session session)
+    {
+        // TODO Auto-generated method stub        
+    }
+
+    @Override
+    public void resumed(org.apache.qpid.transport.Session session)
+    {
+        // TODO Auto-generated method stub
+        
+    }
+
+    @Override
+    public void message(org.apache.qpid.transport.Session ssn, MessageTransfer xfr)
+    {
+        // TODO Auto-generated method stub
+        
+    }
+
+    @Override
+    public void exception(org.apache.qpid.transport.Session session, SessionException exception)
+    {
+        // TODO Auto-generated method stub
+        
+    }
+
+    @Override
+    public void closed(org.apache.qpid.transport.Session session)
+    {
+        // TODO Auto-generated method stub        
+    }
+    // --------------------------------------
+    
     private ConnectionSettings retrieveConnectionSettings(BrokerDetails brokerDetail)
     {
         ConnectionSettings conSettings = brokerDetail.buildConnectionSettings();
@@ -336,14 +392,16 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             try
             {
                 ssn_0_10.awaitOpen();
-            } catch (SessionException se)
+            }
+            catch (SessionException se)
             {
                 // if due to non unique client id for user return false,
                 // otherwise wrap and re-throw.
                 if (ssn_0_10.getDetachCode() != null && ssn_0_10.getDetachCode() == SessionDetachCode.SESSION_BUSY)
                 {
                     throw new InvalidClientIDException("ClientID must be unique");
-                } else
+                }
+                else
                 {
                     String msg = "Unexpected SessionException thrown while awaiting session opening";
                     InvalidClientIDException ex = new InvalidClientIDException(msg,
@@ -387,29 +445,35 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         {
             _logger.warn("Broker property idle_timeout=<mili_secs> is deprecated, please use heartbeat=<secs>");
             heartbeat = Integer.parseInt(brokerDetail.getProperty(BrokerDetails.OPTIONS_IDLE_TIMEOUT)) / 1000;
-        } else if (brokerDetail.getProperty(BrokerDetails.OPTIONS_HEARTBEAT) != null)
+        }
+        else if (brokerDetail.getProperty(BrokerDetails.OPTIONS_HEARTBEAT) != null)
         {
             heartbeat = Integer.parseInt(brokerDetail.getProperty(BrokerDetails.OPTIONS_HEARTBEAT));
-        } else if (Integer.getInteger(ClientProperties.IDLE_TIMEOUT_PROP_NAME) != null)
+        }
+        else if (Integer.getInteger(ClientProperties.IDLE_TIMEOUT_PROP_NAME) != null)
         {
             heartbeat = Integer.getInteger(ClientProperties.IDLE_TIMEOUT_PROP_NAME) / 1000;
             _logger.warn("JVM arg -Didle_timeout=<mili_secs> is deprecated, please use -Dqpid.heartbeat=<secs>");
-        } else if (Integer.getInteger(ClientProperties.HEARTBEAT) != null)
+        }
+        else if (Integer.getInteger(ClientProperties.HEARTBEAT) != null)
         {
             heartbeat = Integer.getInteger(ClientProperties.HEARTBEAT, ClientProperties.HEARTBEAT_DEFAULT);
-        } else
+        }
+        else
         {
             heartbeat = Integer.getInteger("amqj.heartbeat.delay", ClientProperties.HEARTBEAT_DEFAULT);
         }
         return heartbeat;
     }
 
+    // ----------------------------------------
+    // Unimplemented methods
+    // ----------------------------------------
     public ConnectionConsumer createConnectionConsumer(Destination destination, String messageSelector,
             ServerSessionPool sessionPool, int maxMessages) throws JMSException
     {
         checkClosed();
         throw new JmsNotImplementedException();
-
     }
 
     public ConnectionConsumer createConnectionConsumer(Queue queue, String messageSelector,
@@ -431,5 +495,5 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     {
         checkClosed();
         throw new JmsNotImplementedException();
-    }
+    }    
 }

@@ -23,6 +23,9 @@ package org.apache.qpid.util;
 import javax.jms.JMSException;
 
 import org.apache.qpid.AMQException;
+import org.apache.qpid.transport.ConnectionCloseCode;
+import org.apache.qpid.transport.ConnectionException;
+import org.apache.qpid.transport.SessionException;
 
 public class ExceptionHelper
 {
@@ -34,12 +37,29 @@ public class ExceptionHelper
         return ex;
     }
 
-    public static JMSException toJMSException(String msg, String errorCode,
-            Exception e)
+    public static JMSException toJMSException(String msg, ConnectionException ce)
     {
-        JMSException ex = new JMSException(msg, errorCode);
-        ex.initCause(e);
-        ex.setLinkedException(e);
+        String code = ConnectionCloseCode.NORMAL.name();
+        if (ce.getClose() != null && ce.getClose().getReplyCode() != null)
+        {
+            code = ce.getClose().getReplyCode().name();
+        }
+        JMSException ex = new JMSException(msg, code);
+        ex.initCause(ce);
+        ex.setLinkedException(ce);
+        return ex;
+    }
+
+    public static JMSException toJMSException(String msg, SessionException se)
+    {
+        String code = "UNSPECIFIED";
+        if (se.getException() != null && se.getException().getErrorCode() != null)
+        {
+            code = se.getException().getErrorCode().name();
+        }
+        JMSException ex = new JMSException(msg, code);
+        ex.initCause(se);
+        ex.setLinkedException(se);
         return ex;
     }
 }
