@@ -25,6 +25,7 @@ import javax.jms.JMSException;
 import org.apache.qpid.AMQException;
 import org.apache.qpid.transport.ConnectionCloseCode;
 import org.apache.qpid.transport.ConnectionException;
+import org.apache.qpid.transport.ExecutionErrorCode;
 import org.apache.qpid.transport.SessionException;
 
 public class ExceptionHelper
@@ -32,6 +33,14 @@ public class ExceptionHelper
     public static JMSException toJMSException(String msg, Exception e)
     {
         JMSException ex = new JMSException(msg);
+        ex.initCause(e);
+        ex.setLinkedException(e);
+        return ex;
+    }
+
+    public static JMSException toJMSException(String msg, String errorCode, AMQException e)
+    {
+        JMSException ex = new JMSException(msg, e.getErrorCode().getName().asString());
         ex.initCause(e);
         ex.setLinkedException(e);
         return ex;
@@ -53,13 +62,32 @@ public class ExceptionHelper
     public static JMSException toJMSException(String msg, SessionException se)
     {
         String code = "UNSPECIFIED";
+        ExecutionErrorCode executionError = ExecutionErrorCode.INTERNAL_ERROR;
         if (se.getException() != null && se.getException().getErrorCode() != null)
         {
             code = se.getException().getErrorCode().name();
+            executionError = se.getException().getErrorCode();
         }
-        JMSException ex = new JMSException(msg, code);
-        ex.initCause(se);
-        ex.setLinkedException(se);
-        return ex;
+        if (executionError == ExecutionErrorCode.UNAUTHORIZED_ACCESS || executionError == ExecutionErrorCode.NOT_FOUND)
+        {
+            JMSException ex = new javax.jms.JMSSecurityException(msg, code);
+            ex.initCause(se);
+            ex.setLinkedException(se);
+            return ex;
+        }
+        else if (executionError == ExecutionErrorCode.ILLEGAL_STATE)
+        {
+            JMSException ex = new javax.jms.IllegalStateException(msg, code);
+            ex.initCause(se);
+            ex.setLinkedException(se);
+            return ex;
+        }
+        else
+        {
+            JMSException ex = new JMSException(msg, code);
+            ex.initCause(se);
+            ex.setLinkedException(se);
+            return ex;
+        }
     }
 }

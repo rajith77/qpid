@@ -67,7 +67,7 @@ import org.apache.qpid.util.ExceptionHelper;
 
 public class SessionImpl implements Session, QueueSession, TopicSession
 {
-    private static final Logger _logger = Logger.get(ConnectionImpl.class);
+    private static final Logger _logger = Logger.get(SessionImpl.class);
 
     private static Timer timer = new Timer("ack-flusher", true);
 

@@ -20,25 +20,40 @@
  */
 package org.apache.qpid.amqp_0_10.jms.impl;
 
+import java.util.concurrent.LinkedBlockingQueue;
+
+import javax.jms.Destination;
+import javax.jms.InvalidDestinationException;
 import javax.jms.JMSException;
 import javax.jms.Message;
 import javax.jms.MessageConsumer;
 import javax.jms.MessageListener;
 
+import org.apache.qpid.client.AMQDestination;
+
 public class MessageConsumerImpl implements MessageConsumer
-{
+{   
     private SessionImpl _session;
     private DestinationImpl _dest;
     private String _selector;
     private boolean _noLocal;
+    private String _subscriptionQueue;
+    private int _capacity;
     
-    protected MessageConsumerImpl(SessionImpl ssn, DestinationImpl dest, String selector, boolean noLocal)
+    private LinkedBlockingQueue _localQueue;
+    
+    protected MessageConsumerImpl(SessionImpl ssn, Destination dest, String selector, boolean noLocal) throws JMSException
     {
+        if (!(dest instanceof DestinationImpl))
+        {
+            throw new InvalidDestinationException("Invalid destination class " + dest.getClass().getName());
+        }
         _session = ssn;
-        _dest = dest;
+        _dest = (DestinationImpl)dest;
         _selector = selector;
         _noLocal = noLocal;
-        
+        _capacity = AddressResolution.evaluateCapacity(0, _dest); // TODO get max prefetch from connection
+        _localQueue = new LinkedBlockingQueue(_capacity);
     }
 
     @Override

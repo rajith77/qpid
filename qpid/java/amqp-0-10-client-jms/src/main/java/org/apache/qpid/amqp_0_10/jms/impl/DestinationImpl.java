@@ -20,9 +20,52 @@
  */
 package org.apache.qpid.amqp_0_10.jms.impl;
 
+import java.util.WeakHashMap;
+
 import javax.jms.Destination;
+import javax.jms.JMSException;
+
+import org.apache.qpid.address.Address;
 
 public class DestinationImpl implements Destination
 {
+    private static final WeakHashMap<String, DestinationImpl> DESTINATION_CACHE =
+            new WeakHashMap<String, DestinationImpl>();
 
+    private final Address _address;
+    
+    protected DestinationImpl(String addr) throws JMSException
+    {
+        _address = Address.parse(addr);
+    }
+    
+    protected Address getAddress()
+    {
+        return _address;
+    }
+    
+    @Override
+    public int hashCode()
+    {
+        return _address.hashCode();
+    }
+
+    @Override
+    public boolean equals(final Object obj)
+    {
+        return obj != null
+               && obj.getClass() == getClass()
+               && _address.equals(((DestinationImpl)obj)._address);
+    }
+
+    public static synchronized DestinationImpl createDestination(final String address) throws JMSException
+    {
+        DestinationImpl destination = DESTINATION_CACHE.get(address);
+        if(destination == null)
+        {
+            destination = new DestinationImpl(address);
+            DESTINATION_CACHE.put(address, destination);
+        }
+        return destination;
+    } 
 }
