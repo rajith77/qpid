@@ -38,13 +38,12 @@ import org.apache.qpid.util.ExceptionHelper;
 public class Address
 {
     private static final Logger _logger = Logger.get(Address.class);
-    
-    private static final int MAX_CACHED_ENTRIES = 
-            Integer.getInteger(ClientProperties.QPID_MAX_CACHED_ADDR_STRINGS,ClientProperties.DEFAULT_MAX_CACHED_ADDR_STRINGS);
-    
-    private static final Map<String, Address> ADDRESS_CACHE =
-            Collections.synchronizedMap(
-                    new LinkedHashMap<String, Address>(MAX_CACHED_ENTRIES +1,1.1f,true)
+
+    private static final int MAX_CACHED_ENTRIES = Integer.getInteger(ClientProperties.QPID_MAX_CACHED_ADDR_STRINGS,
+            ClientProperties.DEFAULT_MAX_CACHED_ADDR_STRINGS);
+
+    private static final Map<String, Address> ADDRESS_CACHE = Collections
+            .synchronizedMap(new LinkedHashMap<String, Address>(MAX_CACHED_ENTRIES + 1, 1.1f, true)
             {
                 @Override
                 protected boolean removeEldestEntry(Map.Entry<String, Address> eldest)
@@ -59,6 +58,8 @@ public class Address
     private final String _subject;
 
     private final String _myToString;
+
+    private final boolean _browseOnly;
 
     private final Node _node;
 
@@ -85,13 +86,14 @@ public class Address
         }
     }
 
-    Address(String name, String subject, Node node, Link link)
+    Address(String name, String subject, boolean browseOnly, Node node, Link link)
     {
         _name = name;
         _subject = subject;
         _node = node;
         _link = link;
-        _myToString = String.format("%s/%s; %s %s", pprint(_name), pprint(_subject), node.toString(),link.toString());
+        _browseOnly = browseOnly;
+        _myToString = String.format("%s/%s; %s %s", pprint(_name), pprint(_subject), node.toString(), link.toString());
     }
 
     public String getName()
@@ -107,6 +109,11 @@ public class Address
     public Node getNode()
     {
         return _node;
+    }
+
+    public boolean isBrowseOnly()
+    {
+        return _browseOnly;
     }
 
     public Link getLink()

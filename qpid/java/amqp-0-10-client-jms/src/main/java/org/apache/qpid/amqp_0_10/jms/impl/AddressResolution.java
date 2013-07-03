@@ -19,11 +19,11 @@ package org.apache.qpid.amqp_0_10.jms.impl;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import javax.jms.InvalidDestinationException;
 import javax.jms.JMSException;
 
-import org.apache.qpid.AMQException;
 import org.apache.qpid.address.Address;
 import org.apache.qpid.address.AddressHelper;
 import org.apache.qpid.address.AddressPolicy;
@@ -31,10 +31,12 @@ import org.apache.qpid.address.Binding;
 import org.apache.qpid.address.Link;
 import org.apache.qpid.address.Node;
 import org.apache.qpid.address.NodeType;
-import org.apache.qpid.protocol.AMQConstant;
+import org.apache.qpid.address.SubscriptionQueue;
 import org.apache.qpid.transport.ExchangeBoundResult;
 import org.apache.qpid.transport.ExchangeQueryResult;
 import org.apache.qpid.transport.ExecutionErrorCode;
+import org.apache.qpid.transport.MessageAcceptMode;
+import org.apache.qpid.transport.MessageAcquireMode;
 import org.apache.qpid.transport.Option;
 import org.apache.qpid.transport.QueueQueryResult;
 import org.apache.qpid.transport.SessionException;
@@ -56,7 +58,41 @@ public class AddressResolution
         QUEUE, EXCHANGE, AMBIGUOUS, NOT_FOUND
     };
 
-    static void verifyDestination(SessionImpl ssn, DestinationImpl dest, CheckMode mode) throws JMSException
+    public static String verifyAndCreateSubscription(SessionImpl ssn, DestinationImpl dest, String consumerId, AcknowledgeMode ackMode, boolean noLocal) throws JMSException
+    {
+        NodeType nodeType = AddressResolution.resolveDestination(ssn, dest, CheckMode.RECEIVER);
+        String subscriptionQueue;
+        if (NodeType.TOPIC == nodeType)
+        {
+            subscriptionQueue = AddressResolution.createSubscriptionQueue(ssn, dest, noLocal);
+        }
+        else
+        {
+            subscriptionQueue = dest.getAddress().getName();
+        }
+
+        Map<String,Object> args = null;
+        if (dest.getAddress().getLink().getSubscription().getArgs().size() > 0)
+        {
+            args = dest.getAddress().getLink().getSubscription().getArgs();
+        }
+        
+        try
+        {
+            ssn.getAMQPSession().messageSubscribe(subscriptionQueue, consumerId, getMessageAcceptMode(ackMode),
+                    getMessageAcquireMode(dest), null, 0, args,
+                    dest.getAddress().getLink().getSubscription().isExclusive() ? Option.EXCLUSIVE : Option.NONE);
+        }
+        catch (Exception e)
+        {
+            throw ExceptionHelper.toJMSException("Error creating subscription.", e);
+        }
+
+        return subscriptionQueue;
+    }
+    
+    static NodeType resolveDestination(SessionImpl ssn, DestinationImpl dest, CheckMode mode)
+            throws JMSException
     {
         NodeQueryStatus status = verifyNodeExists(ssn, dest);
         switch (status)
@@ -66,13 +102,13 @@ public class AddressResolution
             {
                 assertQueue(ssn, dest, mode);
             }
-            break;
+            return NodeType.QUEUE;
         case EXCHANGE:
             if (checkAddressPolicy(dest.getAddress().getNode().getAssertPolicy(), mode))
             {
                 assertExchange(ssn, dest, mode);
             }
-            break;
+            return NodeType.TOPIC;
         case NOT_FOUND:
             if (checkAddressPolicy(dest.getAddress().getNode().getCreatePolicy(), mode))
             {
@@ -80,11 +116,13 @@ public class AddressResolution
                 if (type == NodeType.TOPIC)
                 {
                     handleExchangeCreation(ssn, dest);
+                    return NodeType.TOPIC;
                 }
                 else
                 // if UNDEFINED, still treat it as QUEUE
                 {
                     handleQueueCreation(ssn, dest);
+                    return NodeType.QUEUE;
                 }
             }
             else
@@ -92,7 +130,7 @@ public class AddressResolution
                 throw new InvalidDestinationException("The name '" + dest.getAddress().getName()
                         + "' supplied in the address doesn't resolve to an exchange or a queue");
             }
-        case AMBIGUOUS:
+        default: // AMBIGUOUS
             throw new InvalidDestinationException("Ambiguous address, please specify node type as 'queue' or 'topic'");
         }
     }
@@ -102,32 +140,73 @@ public class AddressResolution
         Address addr = dest.getAddress();
         Node node = addr.getNode();
 
-        ssn.getAMQPSession().queueDeclare(addr.getName(), node.getAlternateExchange(), node.getDeclareArgs(),
-                node.isAutoDelete() ? Option.AUTO_DELETE : Option.NONE,
-                node.isDurable() ? Option.DURABLE : Option.NONE, node.isExclusive() ? Option.EXCLUSIVE : Option.NONE);
+        try
+        {
+            ssn.getAMQPSession().queueDeclare(addr.getName(), node.getAlternateExchange(), node.getDeclareArgs(),
+                    node.isAutoDelete() ? Option.AUTO_DELETE : Option.NONE,
+                    node.isDurable() ? Option.DURABLE : Option.NONE,
+                    node.isExclusive() ? Option.EXCLUSIVE : Option.NONE);
+        }
+        catch (SessionException se)
+        {
+            _logger.error(se, "Error creating Queue");
+            throw ExceptionHelper.toJMSException("Address resolutionn failed!. Error creating Queue", se);
+        }
 
-        createBindings(ssn, dest, node.getBindings(), addr.getName(), null);
-        // sync();
+        try
+        {
+            createBindings(ssn, dest, node.getBindings(), addr.getName(), null);
+        }
+        catch (SessionException se)
+        {
+            _logger.error(se, "Error creating node bindings for : " + dest.getAddress());
+            throw ExceptionHelper.toJMSException("Address resolutionn failed!. Error creating node bindings for : "
+                    + dest.getAddress(), se);
+        }
     }
 
     static void handleExchangeCreation(SessionImpl ssn, DestinationImpl dest) throws JMSException
     {
         Node node = dest.getAddress().getNode();
         String name = dest.getAddress().getName();
-        ssn.getAMQPSession()
-                .exchangeDeclare(name, node.getExchangeType(), node.getAlternateExchange(), node.getDeclareArgs(),
-                        name.toString().startsWith("amq.") ? Option.PASSIVE : Option.NONE,
-                        node.isDurable() ? Option.DURABLE : Option.NONE,
-                        node.isAutoDelete() ? Option.AUTO_DELETE : Option.NONE);
+        try
+        {
+            ssn.getAMQPSession().exchangeDeclare(name, node.getExchangeType(), node.getAlternateExchange(),
+                    node.getDeclareArgs(), name.toString().startsWith("amq.") ? Option.PASSIVE : Option.NONE,
+                    node.isDurable() ? Option.DURABLE : Option.NONE,
+                    node.isAutoDelete() ? Option.AUTO_DELETE : Option.NONE);
+        }
+        catch (SessionException se)
+        {
+            _logger.error(se, "Error creating Exchange");
+            throw ExceptionHelper.toJMSException("Address resolutionn failed!. Error creating Exchange.", se);
+        }
 
-        createBindings(ssn, dest, node.getBindings(), name, null);
-        // sync();
+        try
+        {
+            createBindings(ssn, dest, node.getBindings(), name, null);
+        }
+        catch (SessionException se)
+        {
+            _logger.error(se, "Error creating node bindings for : " + dest.getAddress());
+            throw ExceptionHelper.toJMSException("Address resolutionn failed!. Error creating node bindings for : "
+                    + dest.getAddress(), se);
+        }
     }
 
     static void handleLinkCreation(SessionImpl ssn, DestinationImpl dest, String defaultExchange, String defaultQueue)
             throws JMSException
     {
-        createBindings(ssn, dest, dest.getAddress().getLink().getBindings(), defaultExchange, defaultQueue);
+        try
+        {
+            createBindings(ssn, dest, dest.getAddress().getLink().getBindings(), defaultExchange, defaultQueue);
+        }
+        catch (SessionException se)
+        {
+            _logger.error(se, "Error creating link bindings for : " + dest.getAddress());
+            ExceptionHelper.toJMSException(
+                    "Address resolutionn failed!. Error creating link bindings for : " + dest.getAddress(), se);
+        }
     }
 
     static void createBindings(SessionImpl ssn, DestinationImpl dest, List<Binding> bindings, String defaultExchange,
@@ -174,7 +253,110 @@ public class AddressResolution
         }
     }
 
-    // We need to destroy link bindings
+    static String createSubscriptionQueue(SessionImpl ssn, DestinationImpl dest, boolean noLocal) throws JMSException
+    {
+        try
+        {
+            Link link = dest.getAddress().getLink();
+            SubscriptionQueue queue = link.getSubscriptionQueue();
+            String name = link.getName() == null ? "TempQueue_" + UUID.randomUUID() : dest.getAddress().getLink()
+                    .getName();
+
+            Map<String, Object> args = queue.getDeclareArgs();
+            if (noLocal)
+            {
+                args.put(AddressHelper.NO_LOCAL, true);
+            }
+            
+            ssn.getAMQPSession().queueDeclare(name, queue.getAlternateExchange(), args.size() > 0? args : null,
+                    queue.isAutoDelete() ? Option.AUTO_DELETE : Option.NONE,
+                    link.isDurable() ? Option.DURABLE : Option.NONE,
+                    queue.isExclusive() ? Option.EXCLUSIVE : Option.NONE);
+
+            ssn.getAMQPSession().sync();
+            return name;
+        }
+        catch (SessionException se)
+        {
+            _logger.error(se, "Error creating subscription queue");
+            throw ExceptionHelper.toJMSException("Error creating subscription queue", se);
+        }
+    }
+
+    public static void cleanupForConsumer(SessionImpl ssn, DestinationImpl dest, String subscriptionQueue)
+            throws JMSException
+    {
+        cleanup(ssn, dest, CheckMode.RECEIVER, subscriptionQueue);
+    }
+
+    public static void cleanupForProducer(SessionImpl ssn, DestinationImpl dest) throws JMSException
+    {
+        cleanup(ssn, dest, CheckMode.SENDER, null);
+    }
+
+    static void cleanup(SessionImpl ssn, DestinationImpl dest, CheckMode mode, String subscriptionQueue)
+            throws JMSException
+    {
+        try
+        {
+            NodeType nodeType = null;
+            NodeQueryStatus status = verifyNodeExists(ssn, dest);
+            switch (status)
+            {
+            case QUEUE:
+                nodeType = NodeType.QUEUE;
+                break;
+            case EXCHANGE:
+                nodeType = NodeType.TOPIC;
+                break;
+            case AMBIGUOUS:
+                switch (dest.getAddress().getNode().getType())
+                {
+                case QUEUE:
+                case TOPIC:
+                    nodeType = dest.getAddress().getNode().getType();
+                case UNDEFINED:
+                    throw new JMSException("Unable to determine node type."
+                            + "Ambiguous address, please specify node type as 'queue' or 'topic'");
+                }
+            case NOT_FOUND:
+                break;
+            }
+
+            handleLinkDelete(ssn, dest, NodeType.TOPIC == nodeType ? dest.getAddress().getName() : null,
+                    subscriptionQueue);
+
+            Link link = dest.getAddress().getLink();
+            if (CheckMode.RECEIVER == mode && NodeType.TOPIC == nodeType
+                    && (link.getName() == null || link.getSubscriptionQueue().isExclusive()))
+            {
+                handleQueueDelete(ssn, subscriptionQueue);
+            }
+
+            if (checkAddressPolicy(dest.getAddress().getNode().getDeletePolicy(), mode))
+            {
+                if (NodeType.QUEUE == nodeType)
+                {
+                    handleQueueDelete(ssn, dest.getAddress().getName());
+                }
+                else if (NodeType.TOPIC == nodeType)
+                {
+                    handleExchangeDelete(ssn, dest.getAddress().getName());
+                }
+                else
+                {
+                    _logger.warn("Node delete failed as it is already deleted. Address is : " + dest.getAddress());
+                    // TODO Should we throw an exception here ?
+                }
+            }
+        }
+        catch (SessionException se)
+        {
+            _logger.error(se, "Error deleting Node for address : " + dest.getAddress());
+            throw ExceptionHelper.toJMSException("Error deleting Node for address : " + dest.getAddress(), se);
+        }
+    }
+
     static void handleLinkDelete(SessionImpl ssn, DestinationImpl dest, String defaultExchange, String defaultQueue)
             throws JMSException
     {
@@ -206,50 +388,53 @@ public class AddressResolution
             }
         }
 
-        for (Binding binding : bindings)
+        try
         {
-            String queue = binding.getQueue() == null ? defaultQueue : binding.getQueue();
-
-            String exchange = binding.getExchange() == null ? defaultExchange : binding.getExchange();
-
-            if (_logger.isDebugEnabled())
+            for (Binding binding : bindings)
             {
-                _logger.debug("Unbinding queue : " + queue + " exchange: " + exchange + " using binding key "
-                        + binding.getBindingKey() + " with args " + Strings.printMap(binding.getArgs()));
+                String queue = binding.getQueue() == null ? defaultQueue : binding.getQueue();
+
+                String exchange = binding.getExchange() == null ? defaultExchange : binding.getExchange();
+
+                if (_logger.isDebugEnabled())
+                {
+                    _logger.debug("Unbinding queue : " + queue + " exchange: " + exchange + " using binding key "
+                            + binding.getBindingKey() + " with args " + Strings.printMap(binding.getArgs()));
+                }
+                ssn.getAMQPSession().exchangeUnbind(queue, exchange, binding.getBindingKey());
             }
-            ssn.getAMQPSession().exchangeUnbind(queue, exchange, binding.getBindingKey());
+        }
+        catch (SessionException se)
+        {
+            _logger.error(se, "Error deleting link bindings for : " + dest.getAddress());
+            throw ExceptionHelper.toJMSException("Error deleting link bindings for : " + dest.getAddress(), se);
+        }
+
+    }
+
+    static void handleExchangeDelete(SessionImpl ssn, String name) throws JMSException
+    {
+        try
+        {
+            ssn.getAMQPSession().exchangeDelete(name);
+        }
+        catch (Exception se)
+        {
+            _logger.error(se, "Error deleting Exchange : " + name);
+            throw ExceptionHelper.toJMSException("Error deleting Exchange : " + name, se);
         }
     }
 
-    // TODO handle deletion of subscription queue
-
-    static void handleNodeDelete(SessionImpl ssn, DestinationImpl dest, CheckMode mode) throws JMSException
+    static void handleQueueDelete(SessionImpl ssn, String name) throws JMSException
     {
-        if (checkAddressPolicy(dest.getAddress().getNode().getDeletePolicy(), mode))
+        try
         {
-            NodeQueryStatus status = verifyNodeExists(ssn, dest);
-            switch (status)
-            {
-            case QUEUE:
-                ssn.getAMQPSession().queueDelete(dest.getAddress().getName());
-                break;
-            case EXCHANGE:
-                ssn.getAMQPSession().exchangeDelete(dest.getAddress().getName());
-                break;
-            case AMBIGUOUS:
-                switch (dest.getAddress().getNode().getType())
-                {
-                case QUEUE:
-                    ssn.getAMQPSession().queueDelete(dest.getAddress().getName());
-                case TOPIC:
-                    ssn.getAMQPSession().exchangeDelete(dest.getAddress().getName());
-                case UNDEFINED:
-                    throw new JMSException("Unable to delete node."
-                            + "Ambiguous address, please specify node type as 'queue' or 'topic'");
-                }
-            default:
-                break;
-            }
+            ssn.getAMQPSession().queueDelete(name);
+        }
+        catch (Exception se)
+        {
+            _logger.error(se, "Error deleting Queue  : " + name);
+            throw ExceptionHelper.toJMSException("Error deleting Queue : " + name, se);
         }
     }
 
@@ -368,7 +553,7 @@ public class AddressResolution
         else
         {
             return defaultCapacity;
-        }        
+        }
     }
 
     static boolean matchProps(Map<String, Object> target, Map<String, Object> source)
@@ -389,5 +574,15 @@ public class AddressResolution
             }
         }
         return match;
+    }
+
+    static MessageAcceptMode getMessageAcceptMode(AcknowledgeMode mode)
+    {
+        return mode == AcknowledgeMode.NO_ACK ? MessageAcceptMode.NONE : MessageAcceptMode.EXPLICIT;
+    }
+
+    static MessageAcquireMode getMessageAcquireMode(DestinationImpl dest)
+    {
+        return dest.getAddress().isBrowseOnly() ? MessageAcquireMode.NOT_ACQUIRED : MessageAcquireMode.PRE_ACQUIRED;
     }
 }

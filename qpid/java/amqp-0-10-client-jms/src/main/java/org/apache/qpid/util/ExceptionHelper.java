@@ -32,13 +32,28 @@ public class ExceptionHelper
 {
     public static JMSException toJMSException(String msg, Exception e)
     {
-        JMSException ex = new JMSException(msg);
-        ex.initCause(e);
-        ex.setLinkedException(e);
-        return ex;
+        if (e instanceof ConnectionException)
+        {
+            return toJMSException(msg, (ConnectionException) e);
+        }
+        else if (e instanceof SessionException)
+        {
+            return toJMSException(msg, (SessionException) e);
+        }
+        else if (e instanceof AMQException)
+        {
+            return toJMSException(msg, (AMQException) e);
+        }
+        else
+        {
+            JMSException ex = new JMSException(msg);
+            ex.initCause(e);
+            ex.setLinkedException(e);
+            return ex;
+        }
     }
 
-    public static JMSException toJMSException(String msg, String errorCode, AMQException e)
+    public static JMSException toJMSException(String msg, AMQException e)
     {
         JMSException ex = new JMSException(msg, e.getErrorCode().getName().asString());
         ex.initCause(e);

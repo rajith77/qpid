@@ -97,7 +97,7 @@ public enum DestSyntax
         org.apache.qpid.messaging.Address rawAddr = new AddressParser(str).parse();
         AddressHelper helper = new AddressHelper(rawAddr);
 
-        return new Address(rawAddr.getName(),rawAddr.getSubject(),helper.getNode(),helper.getLink());
+        return new Address(rawAddr.getName(),rawAddr.getSubject(), helper.isBrowseOnly(), helper.getNode(),helper.getLink());
     }
     
     public static Address parseBURLString(String str) throws AddressException

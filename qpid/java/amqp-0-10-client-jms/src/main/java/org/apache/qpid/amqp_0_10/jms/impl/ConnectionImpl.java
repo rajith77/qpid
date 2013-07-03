@@ -24,6 +24,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import javax.jms.Connection;
 import javax.jms.ConnectionConsumer;
@@ -60,7 +65,8 @@ import org.apache.qpid.transport.SessionListener;
 import org.apache.qpid.transport.util.Logger;
 import org.apache.qpid.util.ExceptionHelper;
 
-public class ConnectionImpl implements Connection, TopicConnection, QueueConnection, ConnectionListener, SessionListener
+public class ConnectionImpl implements Connection, TopicConnection, QueueConnection, ConnectionListener,
+        SessionListener
 {
     private static final Logger _logger = Logger.get(ConnectionImpl.class);
 
@@ -69,7 +75,15 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         UNCONNECTED, STOPPED, STARTED, CLOSED
     }
 
+    private final Lock _conditionLock = new ReentrantLock();
+    
     private final Object _lock = new Object();
+
+    private AtomicBoolean _failoverInProgress = new AtomicBoolean(false);
+
+    private final Condition _failoverComplete  = _conditionLock.newCondition(); 
+
+    private final Condition _started  = _conditionLock.newCondition(); 
 
     private org.apache.qpid.transport.Connection _amqpConnection;
 
@@ -77,7 +91,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     private volatile State _state = State.UNCONNECTED;
 
-    private AMQConnectionURL _url;
+    private final AMQConnectionURL _url;
 
     private String _clientId;
 
@@ -89,7 +103,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     {
         _url = url;
         _amqpConnection = new org.apache.qpid.transport.Connection();
-        _amqpConnection.addConnectionListener(this);              
+        _amqpConnection.addConnectionListener(this);
     }
 
     private void connect(ConnectionSettings conSettings) throws JMSException
@@ -116,7 +130,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                     throw ExceptionHelper.toJMSException("Invalid Protocol Version", pe);
                 }
                 catch (ConnectionException ce)
-                {                    
+                {
                     String msg = "Cannot connect to broker: " + ce.getMessage();
                     throw ExceptionHelper.toJMSException(msg, ce);
                 }
@@ -182,7 +196,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     private SessionImpl createSession(int ackMode) throws JMSException
     {
         checkClosed();
-        if(_state == State.UNCONNECTED)
+        if (_state == State.UNCONNECTED)
         {
             ConnectionSettings conSettings = retrieveConnectionSettings(_url.getBrokerDetails(0));
             connect(conSettings);
@@ -238,7 +252,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             if (_state == State.UNCONNECTED)
             {
                 ConnectionSettings conSettings = retrieveConnectionSettings(_url.getBrokerDetails(0));
-                connect(conSettings);  
+                connect(conSettings);
                 _state = State.STARTED;
             }
 
@@ -279,7 +293,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     }
 
     // ----------------------------------------
-    // SessionListener
+    // ConnectionListener
     // -----------------------------------------
     @Override
     public void opened(org.apache.qpid.transport.Connection connection)
@@ -317,37 +331,96 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     @Override
     public void opened(org.apache.qpid.transport.Session session)
     {
-        // TODO Auto-generated method stub        
+        // TODO Auto-generated method stub
     }
 
     @Override
     public void resumed(org.apache.qpid.transport.Session session)
     {
         // TODO Auto-generated method stub
-        
+
     }
 
     @Override
     public void message(org.apache.qpid.transport.Session ssn, MessageTransfer xfr)
     {
         // TODO Auto-generated method stub
-        
+
     }
 
     @Override
     public void exception(org.apache.qpid.transport.Session session, SessionException exception)
     {
         // TODO Auto-generated method stub
-        
+
     }
 
     @Override
     public void closed(org.apache.qpid.transport.Session session)
     {
-        // TODO Auto-generated method stub        
+        // TODO Auto-generated method stub
     }
+
     // --------------------------------------
-    
+
+    boolean isStarted()
+    {
+        return _state == State.STARTED;
+    }
+
+    boolean isFailoverInProgress()
+    {
+        return _failoverInProgress.get();
+    }
+
+    long waitForFailoverToComplete(long timeout) throws InterruptedException
+    {
+        _conditionLock.lock();
+        try
+        {
+            synchronized (_failoverInProgress)
+            {
+                if (_failoverInProgress.get())
+                {
+                    long remaining = _failoverComplete.awaitNanos(TimeUnit.MILLISECONDS.toNanos(timeout));
+                    return TimeUnit.NANOSECONDS.toMillis(remaining);
+                }
+                else
+                {
+                    return timeout;
+                }
+            }
+        }
+        finally
+        {
+            _conditionLock.unlock();
+        }
+    }
+
+    long waitForConnectionToStart(long timeout) throws InterruptedException
+    {
+        _conditionLock.lock();
+        try
+        {
+            synchronized (_lock)
+            {
+                if (_state != State.STARTED)
+                {
+                    long remaining = _started.awaitNanos(TimeUnit.MILLISECONDS.toNanos(timeout));
+                    return TimeUnit.NANOSECONDS.toMillis(remaining);
+                }
+                else
+                {
+                    return timeout;
+                }
+            }
+        }
+        finally
+        {
+            _conditionLock.unlock();
+        }
+    }
+
     private ConnectionSettings retrieveConnectionSettings(BrokerDetails brokerDetail)
     {
         ConnectionSettings conSettings = brokerDetail.buildConnectionSettings();
@@ -495,5 +568,5 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     {
         checkClosed();
         throw new JmsNotImplementedException();
-    }    
+    }
 }

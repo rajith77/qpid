@@ -101,7 +101,7 @@ public class Link
         return _bindings;
     }
 
-    public SubscriptionQueue getSubscribeQueue()
+    public SubscriptionQueue getSubscriptionQueue()
     {
         return _subscriptionQueue;
     }

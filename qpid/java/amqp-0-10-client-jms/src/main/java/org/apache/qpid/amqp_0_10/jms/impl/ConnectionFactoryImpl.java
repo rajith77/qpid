@@ -37,8 +37,7 @@ import org.apache.qpid.transport.util.Logger;
 import org.apache.qpid.url.URLSyntaxException;
 import org.apache.qpid.util.ExceptionHelper;
 
-public class ConnectionFactoryImpl implements ConnectionFactory,
-        QueueConnectionFactory, TopicConnectionFactory
+public class ConnectionFactoryImpl implements ConnectionFactory, QueueConnectionFactory, TopicConnectionFactory
 {
     private static final Logger _logger = Logger.get(ConnectionFactoryImpl.class);
 
@@ -61,8 +60,7 @@ public class ConnectionFactoryImpl implements ConnectionFactory,
     }
 
     @Override
-    public Connection createConnection(String user, String pass)
-            throws JMSException
+    public Connection createConnection(String user, String pass) throws JMSException
     {
         // TODO Auto-generated method stub
         return null;
@@ -76,8 +74,7 @@ public class ConnectionFactoryImpl implements ConnectionFactory,
     }
 
     @Override
-    public TopicConnection createTopicConnection(String user, String pass)
-            throws JMSException
+    public TopicConnection createTopicConnection(String user, String pass) throws JMSException
     {
         // TODO Auto-generated method stub
         return null;
@@ -91,8 +88,7 @@ public class ConnectionFactoryImpl implements ConnectionFactory,
     }
 
     @Override
-    public QueueConnection createQueueConnection(String user, String pass)
-            throws JMSException
+    public QueueConnection createQueueConnection(String user, String pass) throws JMSException
     {
         // TODO Auto-generated method stub
         return null;
@@ -114,9 +110,7 @@ public class ConnectionFactoryImpl implements ConnectionFactory,
                 }
                 catch (AMQException e)
                 {
-                    throw ExceptionHelper.toJMSException(
-                            "Error creating connection", e.getErrorCode()
-                                    .toString(), e);
+                    throw ExceptionHelper.toJMSException("Error creating connection", e);
                 }
             }
             else

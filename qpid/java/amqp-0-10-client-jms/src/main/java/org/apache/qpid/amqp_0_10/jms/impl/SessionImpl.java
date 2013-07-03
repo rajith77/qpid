@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.jms.BytesMessage;
 import javax.jms.Destination;
@@ -68,6 +69,7 @@ import org.apache.qpid.util.ExceptionHelper;
 public class SessionImpl implements Session, QueueSession, TopicSession
 {
     private static final Logger _logger = Logger.get(SessionImpl.class);
+    private static final AtomicInteger _consumerTag = new AtomicInteger();
 
     private static Timer timer = new Timer("ack-flusher", true);
 
@@ -94,7 +96,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private final ConnectionImpl _conn;
 
-    private final int _ackMode;
+    private final AcknowledgeMode _ackMode;
 
     private long _maxAckDelay = Long.getLong("qpid.session.max_ack_delay", 1000);
 
@@ -111,7 +113,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     protected SessionImpl(ConnectionImpl conn, int ackMode) throws JMSException
     {
         _conn = conn;
-        _ackMode = ackMode;
+        _ackMode = AcknowledgeMode.getAckMode(ackMode);
         createProtocolSession();
     }
 
@@ -130,7 +132,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
         try
         {
-            if (_ackMode == Session.SESSION_TRANSACTED)
+            if (_ackMode == AcknowledgeMode.TRANSACTED)
             {
                 _amqpSession.txSelect();
                 _amqpSession.setTransacted(true);
@@ -451,13 +453,26 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public int getAcknowledgeMode() throws JMSException
     {
-        return _ackMode;
+        return AcknowledgeMode.getJMSAckMode(_ackMode);
     }
 
     @Override
     public boolean getTransacted() throws JMSException
     {
-        return _ackMode == Session.SESSION_TRANSACTED;
+        return _ackMode == AcknowledgeMode.TRANSACTED;
+    }
+
+    ConnectionImpl getConnection()
+    {
+        return _conn;
+    }
+
+    void checkClosed() throws JMSException
+    {
+        if(_closed.get())
+        {
+            throw new IllegalStateException("Session is closed");
+        }
     }
 
     protected void removeProducer(MessageProducerImpl prod)
@@ -473,14 +488,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     protected org.apache.qpid.transport.Session getAMQPSession()
     {
         return _amqpSession;
-    }
-    
-    private void checkClosed() throws JMSException
-    {
-        if(_closed.get())
-        {
-            throw new IllegalStateException("Session is closed");
-        }
     }
     
     private void checkTransactional() throws JMSException
