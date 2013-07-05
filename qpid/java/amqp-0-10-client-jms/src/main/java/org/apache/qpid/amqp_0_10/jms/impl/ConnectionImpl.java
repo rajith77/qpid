@@ -397,30 +397,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         }
     }
 
-    long waitForConnectionToStart(long timeout) throws InterruptedException
-    {
-        _conditionLock.lock();
-        try
-        {
-            synchronized (_lock)
-            {
-                if (_state != State.STARTED)
-                {
-                    long remaining = _started.awaitNanos(TimeUnit.MILLISECONDS.toNanos(timeout));
-                    return TimeUnit.NANOSECONDS.toMillis(remaining);
-                }
-                else
-                {
-                    return timeout;
-                }
-            }
-        }
-        finally
-        {
-            _conditionLock.unlock();
-        }
-    }
-
     private ConnectionSettings retrieveConnectionSettings(BrokerDetails brokerDetail)
     {
         ConnectionSettings conSettings = brokerDetail.buildConnectionSettings();

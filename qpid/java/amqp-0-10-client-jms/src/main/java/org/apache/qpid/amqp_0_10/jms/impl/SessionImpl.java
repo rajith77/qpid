@@ -467,6 +467,11 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         return _conn;
     }
 
+    Thread getDispatcherThread()
+    {
+        return null;
+    }
+    
     void checkClosed() throws JMSException
     {
         if(_closed.get())

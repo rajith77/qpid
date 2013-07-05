@@ -15,14 +15,9 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.qpid.amqp_0_10.jms.impl;
+package org.apache.qpid.amqp_0_10.jms.impl.message;
 
-import javax.jms.Message;
-
-public abstract class MessageImpl implements Message
+public class CloseMessage extends MessageImpl
 {
-    public int getTransferId()
-    {
-        return 0;
-    }
+
 }

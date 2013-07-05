@@ -65,4 +65,9 @@ public class ConditionManager
             }
         }
     }
+
+    public boolean getCurrentValue()
+    {
+        return _condition.get();
+    }
 }
