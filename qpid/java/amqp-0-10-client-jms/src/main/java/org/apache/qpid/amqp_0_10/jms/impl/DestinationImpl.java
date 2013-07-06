@@ -29,21 +29,25 @@ import org.apache.qpid.address.Address;
 
 public class DestinationImpl implements Destination
 {
-    private static final WeakHashMap<String, DestinationImpl> DESTINATION_CACHE =
-            new WeakHashMap<String, DestinationImpl>();
+    private static final WeakHashMap<String, DestinationImpl> DESTINATION_CACHE = new WeakHashMap<String, DestinationImpl>();
 
     private final Address _address;
-    
+
     protected DestinationImpl(String addr) throws JMSException
     {
         _address = Address.parse(addr);
     }
-    
+
+    protected DestinationImpl(Address addr) throws JMSException
+    {
+        _address = addr;
+    }
+
     protected Address getAddress()
     {
         return _address;
     }
-    
+
     @Override
     public int hashCode()
     {
@@ -53,19 +57,17 @@ public class DestinationImpl implements Destination
     @Override
     public boolean equals(final Object obj)
     {
-        return obj != null
-               && obj.getClass() == getClass()
-               && _address.equals(((DestinationImpl)obj)._address);
+        return obj != null && obj.getClass() == getClass() && _address.equals(((DestinationImpl) obj)._address);
     }
 
     public static synchronized DestinationImpl createDestination(final String address) throws JMSException
     {
         DestinationImpl destination = DESTINATION_CACHE.get(address);
-        if(destination == null)
+        if (destination == null)
         {
             destination = new DestinationImpl(address);
             DESTINATION_CACHE.put(address, destination);
         }
         return destination;
-    } 
+    }
 }

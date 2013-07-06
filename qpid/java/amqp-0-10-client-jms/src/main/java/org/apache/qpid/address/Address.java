@@ -42,6 +42,7 @@ public class Address
     private static final int MAX_CACHED_ENTRIES = Integer.getInteger(ClientProperties.QPID_MAX_CACHED_ADDR_STRINGS,
             ClientProperties.DEFAULT_MAX_CACHED_ADDR_STRINGS);
 
+    @SuppressWarnings("serial")
     private static final Map<String, Address> ADDRESS_CACHE = Collections
             .synchronizedMap(new LinkedHashMap<String, Address>(MAX_CACHED_ENTRIES + 1, 1.1f, true)
             {

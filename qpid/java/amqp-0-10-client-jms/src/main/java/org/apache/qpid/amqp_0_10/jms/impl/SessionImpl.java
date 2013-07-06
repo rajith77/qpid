@@ -58,13 +58,12 @@ import javax.jms.TopicSession;
 import javax.jms.TopicSubscriber;
 
 import org.apache.qpid.client.JmsNotImplementedException;
+import org.apache.qpid.client.message.MessageFactory;
 import org.apache.qpid.transport.ConnectionException;
-import org.apache.qpid.transport.RangeSet;
-import org.apache.qpid.transport.RangeSetFactory;
 import org.apache.qpid.transport.SessionException;
 import org.apache.qpid.transport.util.Logger;
-import org.apache.qpid.util.ConditionManager;
 import org.apache.qpid.util.ExceptionHelper;
+import org.apache.qpid.util.MessageFactorySupport;
 
 public class SessionImpl implements Session, QueueSession, TopicSession
 {
@@ -84,11 +83,22 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
         public void run()
         {
-            /*
-             * AMQSession_0_10 ssn = session.get(); if (ssn == null) { cancel();
-             * } else { try { ssn.flushAcknowledgments(true); } catch (Throwable
-             * t) { _logger.error("error flushing acks", t); } }
-             */
+            SessionImpl ssn = _session.get();
+            if (ssn == null)
+            {
+                cancel();
+            }
+            else
+            {
+                try
+                {
+                    ssn.flushPendingAcknowledgements();
+                }
+                catch (JMSException e)
+                {
+                    _logger.warn(e,"Error flushing pending acknowledgements");
+                }
+            }
         }
     }
 
@@ -98,23 +108,30 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private final AcknowledgeMode _ackMode;
 
-    private long _maxAckDelay = Long.getLong("qpid.session.max_ack_delay", 1000);
+    private long _maxAckDelay = Long.getLong("qpid.session.max_ack_delay", 5*60000);
 
     private TimerTask _flushTask = null;
 
-    private List<MessageProducerImpl> _producers = new ArrayList<MessageProducerImpl>(2);
+    private final List<MessageProducerImpl> _producers = new ArrayList<MessageProducerImpl>(2);
 
-    private Map<String, MessageConsumerImpl> _consumers = new HashMap<String, MessageConsumerImpl>(2);
+    private final Map<String, MessageConsumerImpl> _consumers = new HashMap<String, MessageConsumerImpl>(2);
     
-    private ConditionManager _msgDeliveryInProgress = new ConditionManager(false);
+    private final AtomicBoolean _closed = new AtomicBoolean(false);
     
-    private AtomicBoolean _closed = new AtomicBoolean(false);
+    private final MessageFactory _messageFactory;
     
     protected SessionImpl(ConnectionImpl conn, int ackMode) throws JMSException
     {
         _conn = conn;
         _ackMode = AcknowledgeMode.getAckMode(ackMode);
         createProtocolSession();
+        if (AcknowledgeMode.DUPS_OK == _ackMode && _maxAckDelay > 0)
+        {
+            _flushTask = new Flusher(this);
+            timer.schedule(_flushTask, new Date(), _maxAckDelay);
+        }
+        // Message factory could be a connection property if need be.
+        _messageFactory = MessageFactorySupport.getMessageFactory(null);
     }
 
     private void createProtocolSession() throws JMSException
@@ -156,9 +173,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         if (!_closed.get())
         {
             _closed.set(true);
-
-            _msgDeliveryInProgress.waitUntilFalse();
-
+            cancelTimerTask();
             for (MessageProducerImpl prod: _producers)
             {
                 prod.close();
@@ -168,7 +183,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             {
                 cons.close();
             }
-
+            getAMQPSession().close();
             _conn.removeSession(this);
         }
     }
@@ -179,6 +194,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         if (!_closed.get())
         {
             _closed.set(true);
+            cancelTimerTask();
             for (MessageProducerImpl prod: _producers)
             {
                 prod.closed();
@@ -495,6 +511,14 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         return _amqpSession;
     }
     
+    private void flushPendingAcknowledgements() throws JMSException
+    {
+        for(MessageConsumerImpl consumer : _consumers.values())
+        {
+            consumer.sendMessageAccept(true);
+        }
+    }
+
     private void checkTransactional() throws JMSException
     {
         if(!getTransacted())
@@ -511,6 +535,15 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
     }
 
+    private void cancelTimerTask()
+    {
+        if (_flushTask != null)
+        {
+            _flushTask.cancel();
+            _flushTask = null;
+        }
+    }
+    
     //--------------- Unsupported Methods -------------
     @Override
     public void run()
@@ -530,6 +563,11 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     {
         checkClosed();
         throw new JmsNotImplementedException();
+    }
+
+    void acknowledgeMesages()
+    {
+        
     }
 
 }

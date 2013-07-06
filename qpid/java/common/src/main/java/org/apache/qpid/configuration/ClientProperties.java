@@ -208,6 +208,9 @@ public class ClientProperties
     public static final String QPID_MAX_CACHED_ADDR_STRINGS = "qpid.max_cached_address_strings";
     public static final int DEFAULT_MAX_CACHED_ADDR_STRINGS = 10;
 
+    public static final String QPID_MAX_CACHED_DEST = "qpid.max_cached_destinations";
+    public static final int DEFAULT_MAX_CACHED_DEST = 10;
+
     private ClientProperties()
     {
         //No instances

@@ -17,7 +17,20 @@
  */
 package org.apache.qpid.amqp_0_10.jms;
 
-public interface Message extends javax.jms.Message
+import java.nio.ByteBuffer;
+
+import org.apache.qpid.transport.DeliveryProperties;
+import org.apache.qpid.transport.MessageProperties;
+
+public interface AmqpMessage extends javax.jms.Message
 {
     public int getTransferId();
+
+    public DeliveryProperties getDeliveryProperties();
+
+    public MessageProperties getMessageProperties();
+    
+    public ByteBuffer getContent();
+    
+    public void setContent(ByteBuffer buf);
 }

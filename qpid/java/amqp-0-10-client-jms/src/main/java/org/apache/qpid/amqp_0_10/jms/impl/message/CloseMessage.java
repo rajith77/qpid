@@ -17,6 +17,8 @@
  */
 package org.apache.qpid.amqp_0_10.jms.impl.message;
 
+import org.apache.qpid.amqp_0_10.jms.impl.MessageImpl;
+
 public class CloseMessage extends MessageImpl
 {
 

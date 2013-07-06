@@ -36,7 +36,6 @@ import javax.jms.JMSException;
 import javax.jms.MessageConsumer;
 import javax.jms.MessageListener;
 
-import org.apache.qpid.amqp_0_10.jms.Message;
 import org.apache.qpid.transport.MessageCreditUnit;
 import org.apache.qpid.transport.MessageFlowMode;
 import org.apache.qpid.transport.Option;
@@ -67,9 +66,9 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private final AcknowledgeMode _ackMode;
 
-    private final LinkedBlockingQueue<Message> _localQueue;
+    private final LinkedBlockingQueue<MessageImpl> _localQueue;
 
-    private final List<Message> _replayQueue;
+    private final List<MessageImpl> _replayQueue;
 
     private final RangeSet _completions = RangeSetFactory.createRangeSet();
 
@@ -102,7 +101,7 @@ public class MessageConsumerImpl implements MessageConsumer
         _consumerTag = consumerTag;
         _capacity = AddressResolution.evaluateCapacity(0, _dest);
         // TODO get mx prefetch from connnection
-        _localQueue = new LinkedBlockingQueue<Message>(_capacity);
+        _localQueue = new LinkedBlockingQueue<MessageImpl>(_capacity);
 
         switch (ackMode)
         {
@@ -110,10 +109,10 @@ public class MessageConsumerImpl implements MessageConsumer
         case CLIENT_ACK:
         case DUPS_OK:
             // we may want to revisit this for perf reasons.
-            _replayQueue = new ArrayList<Message>(_capacity / 2);
+            _replayQueue = new ArrayList<MessageImpl>(_capacity / 2);
             break;
         default:
-            _replayQueue = Collections.<Message> emptyList();
+            _replayQueue = Collections.<MessageImpl> emptyList();
             break;
         }
 
@@ -177,24 +176,24 @@ public class MessageConsumerImpl implements MessageConsumer
     }
 
     @Override
-    public Message receive() throws JMSException
+    public MessageImpl receive() throws JMSException
     {
         return receiveImpl(0);
     }
 
     @Override
-    public Message receive(long timeout) throws JMSException
+    public MessageImpl receive(long timeout) throws JMSException
     {
         return receiveImpl(timeout);
     }
 
     @Override
-    public Message receiveNoWait() throws JMSException
+    public MessageImpl receiveNoWait() throws JMSException
     {
         return receiveImpl(-1L);
     }
 
-    Message receiveImpl(long timeout) throws JMSException
+    MessageImpl receiveImpl(long timeout) throws JMSException
     {
         checkClosed();
         long remaining = preSyncReceive(timeout);
@@ -211,7 +210,7 @@ public class MessageConsumerImpl implements MessageConsumer
 
         _syncReceiveThread = Thread.currentThread();
         _msgDeliveryInProgress.setValueAndNotify(true);
-        Message m = null;
+        MessageImpl m = null;
         try
         {
             if (_localQueue.isEmpty() && isPrefetchDisabled())
@@ -253,7 +252,7 @@ public class MessageConsumerImpl implements MessageConsumer
         return m;
     }
 
-    void messageReceived(Message m)
+    void messageReceived(MessageImpl m)
     {
         if (_closed.get())
         {
@@ -317,7 +316,7 @@ public class MessageConsumerImpl implements MessageConsumer
         }
     }
 
-    void postDeliver(Message m) throws JMSException
+    void postDeliver(MessageImpl m) throws JMSException
     {
         sendCompleted(m);
         switch (_ackMode)
@@ -392,13 +391,13 @@ public class MessageConsumerImpl implements MessageConsumer
 
     void requeueUnackedMessages() throws JMSException
     {
-        ArrayList<Message> tmp = new ArrayList<Message>(_localQueue.size());
+        ArrayList<MessageImpl> tmp = new ArrayList<MessageImpl>(_localQueue.size());
         _localQueue.drainTo(tmp);
 
         for (int i = _replayQueue.size() - 1; i >= 0; i--)
         {
-            Message m = _replayQueue.get(i);
-            m.setJMSRedelivered(true);
+            MessageImpl m = _replayQueue.get(i);
+            m.getDeliveryProperties().setRedelivered(true);
             _localQueue.add(m);
         }
         _localQueue.addAll(tmp);
@@ -418,14 +417,14 @@ public class MessageConsumerImpl implements MessageConsumer
         try
         {
             RangeSet unacked = RangeSetFactory.createRangeSet();
-            for (Message m : _replayQueue)
+            for (MessageImpl m : _replayQueue)
             {
                 unacked.add(m.getTransferId());
             }
             _session.getAMQPSession().messageRelease(unacked, Option.REDELIVERED);
             _replayQueue.clear();
             RangeSet prefetched = RangeSetFactory.createRangeSet();
-            for (Message m : _localQueue)
+            for (MessageImpl m : _localQueue)
             {
                 prefetched.add(m.getTransferId());
             }
@@ -438,7 +437,7 @@ public class MessageConsumerImpl implements MessageConsumer
         }
     }
 
-    private void releaseMessage(Message m) throws JMSException
+    void releaseMessage(MessageImpl m) throws JMSException
     {
         try
         {
@@ -453,7 +452,7 @@ public class MessageConsumerImpl implements MessageConsumer
     }
 
     // In 0-10 completions affects message credit
-    private void sendCompleted(Message m)
+    void sendCompleted(MessageImpl m)
     {
         _unsentCompletions++;
         _completions.add(m.getTransferId());
@@ -469,7 +468,7 @@ public class MessageConsumerImpl implements MessageConsumer
         }
     }
 
-    private void sendMessageAccept(Message m, boolean sync) throws JMSException
+    void sendMessageAccept(MessageImpl m, boolean sync) throws JMSException
     {
         try
         {
@@ -487,12 +486,12 @@ public class MessageConsumerImpl implements MessageConsumer
         }
     }
 
-    private void sendMessageAccept(boolean sync) throws JMSException
+    void sendMessageAccept(boolean sync) throws JMSException
     {
         try
         {
             RangeSet range = RangeSetFactory.createRangeSet();
-            for (Message m : _replayQueue)
+            for (MessageImpl m : _replayQueue)
             {
                 range.add(m.getTransferId());
             }

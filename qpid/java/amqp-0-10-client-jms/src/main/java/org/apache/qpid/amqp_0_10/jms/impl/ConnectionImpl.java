@@ -49,6 +49,7 @@ import javax.jms.TopicSession;
 
 import org.apache.qpid.client.AMQConnectionURL;
 import org.apache.qpid.client.JmsNotImplementedException;
+import org.apache.qpid.client.message.MessageFactory;
 import org.apache.qpid.client.transport.ClientConnectionDelegate;
 import org.apache.qpid.configuration.ClientProperties;
 import org.apache.qpid.jms.BrokerDetails;
@@ -76,14 +77,14 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     }
 
     private final Lock _conditionLock = new ReentrantLock();
-    
+
     private final Object _lock = new Object();
 
     private AtomicBoolean _failoverInProgress = new AtomicBoolean(false);
 
-    private final Condition _failoverComplete  = _conditionLock.newCondition(); 
+    private final Condition _failoverComplete = _conditionLock.newCondition();
 
-    private final Condition _started  = _conditionLock.newCondition(); 
+    private final Condition _started = _conditionLock.newCondition();
 
     private org.apache.qpid.transport.Connection _amqpConnection;
 
@@ -93,9 +94,9 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     private final AMQConnectionURL _url;
 
-    private String _clientId;
+    private final ConnectionMetaDataImpl _metaData = new ConnectionMetaDataImpl();
 
-    private ConnectionMetaDataImpl _metaData = new ConnectionMetaDataImpl();
+    private String _clientId;
 
     private volatile ExceptionListener _exceptionListener;
 
@@ -362,7 +363,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     }
 
     // --------------------------------------
-
     boolean isStarted()
     {
         return _state == State.STARTED;
