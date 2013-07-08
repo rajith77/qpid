@@ -20,6 +20,9 @@
  */
 package org.apache.qpid.util;
 
+import java.io.EOFException;
+import java.nio.charset.CharacterCodingException;
+
 import javax.jms.JMSException;
 
 import org.apache.qpid.AMQException;
@@ -27,6 +30,7 @@ import org.apache.qpid.transport.ConnectionCloseCode;
 import org.apache.qpid.transport.ConnectionException;
 import org.apache.qpid.transport.ExecutionErrorCode;
 import org.apache.qpid.transport.SessionException;
+import org.apache.qpid.typedmessage.TypedBytesFormatException;
 
 public class ExceptionHelper
 {
@@ -102,6 +106,31 @@ public class ExceptionHelper
             JMSException ex = new JMSException(msg, code);
             ex.initCause(se);
             ex.setLinkedException(se);
+            return ex;
+        }
+    }
+
+    public static JMSException handleMessageException(String msg, Exception e)
+    {
+        if (e instanceof EOFException)
+        {
+            javax.jms.MessageEOFException ex = new javax.jms.MessageEOFException(msg);
+            ex.initCause(e);
+            ex.setLinkedException(e);
+            return ex;
+        }
+        else if (e instanceof TypedBytesFormatException || e instanceof CharacterCodingException)
+        {
+            javax.jms.MessageFormatException ex = new javax.jms.MessageFormatException(msg);
+            ex.initCause(e);
+            ex.setLinkedException(e);
+            return ex;
+        }
+        else
+        {
+            JMSException ex = new JMSException(msg);
+            ex.initCause(e);
+            ex.setLinkedException(e);
             return ex;
         }
     }

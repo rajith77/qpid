@@ -17,9 +17,18 @@
  */
 package org.apache.qpid.amqp_0_10.jms.impl.message;
 
+import java.nio.ByteBuffer;
+
+import javax.jms.JMSException;
+
 import org.apache.qpid.amqp_0_10.jms.impl.MessageImpl;
 
 public class CloseMessage extends MessageImpl
 {
+    @Override
+    public ByteBuffer getContent() throws JMSException
+    {
+        return null;
+    }
 
 }

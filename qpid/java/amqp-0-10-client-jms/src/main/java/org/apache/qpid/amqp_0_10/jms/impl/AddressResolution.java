@@ -39,6 +39,7 @@ import org.apache.qpid.transport.MessageAcceptMode;
 import org.apache.qpid.transport.MessageAcquireMode;
 import org.apache.qpid.transport.Option;
 import org.apache.qpid.transport.QueueQueryResult;
+import org.apache.qpid.transport.ReplyTo;
 import org.apache.qpid.transport.SessionException;
 import org.apache.qpid.transport.util.Logger;
 import org.apache.qpid.util.ExceptionHelper;
@@ -90,7 +91,38 @@ public class AddressResolution
 
         return subscriptionQueue;
     }
-    
+
+    public static ReplyTo getReplyTo(SessionImpl ssn, DestinationImpl dest)
+    {
+        NodeType type = dest.getAddress().getNode().getType();
+        if (type == NodeType.TOPIC)
+        {
+            return new ReplyTo(dest.getAddress().getName(), dest.getAddress().getSubject());
+        }
+        else if (type == NodeType.QUEUE)
+        {
+            return new ReplyTo("", dest.getAddress().getName());
+        }
+        else
+        // if UNDEFINED, try to lookup and if NOT_FOUND still treat it as QUEUE
+        {
+            NodeQueryStatus status = verifyNodeExists(ssn, dest);
+            switch (status)
+            {
+            case QUEUE:
+                return new ReplyTo("", dest.getAddress().getName());
+            case EXCHANGE:
+                return new ReplyTo(dest.getAddress().getName(), dest.getAddress().getSubject());
+            default :
+                // If not found, treat it as a Queue.
+                // The producer or consumer who uses this address will work that out.
+                // It could be that another entity is responsible for creating the node at a later time.
+                // However, If ambiguous what should we do ?
+                return new ReplyTo("", dest.getAddress().getName());
+            }
+        }
+    }
+
     static NodeType resolveDestination(SessionImpl ssn, DestinationImpl dest, CheckMode mode)
             throws JMSException
     {

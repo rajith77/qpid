@@ -52,42 +52,41 @@ public class MessageFactoryImpl implements MessageFactory
     }
 
     @Override
-    public Message createMessage(Session ssn)
+    public Message createMessage()
+    {
+        return new BytesMessageImpl();
+    }
+
+    @Override
+    public TextMessage createTextMessage()
     {
         // TODO Auto-generated method stub
         return null;
     }
 
     @Override
-    public TextMessage createTextMessage(Session ssn)
+    public MapMessage createMapMessage()
     {
         // TODO Auto-generated method stub
         return null;
     }
 
     @Override
-    public MapMessage createMapMessage(Session ssn)
+    public ObjectMessage createObjectMessage()
     {
         // TODO Auto-generated method stub
         return null;
     }
 
     @Override
-    public ObjectMessage createObjectMessage(Session ssn)
+    public StreamMessage createStreamMessage()
     {
         // TODO Auto-generated method stub
         return null;
     }
 
     @Override
-    public StreamMessage createStreamMessage(Session ssn)
-    {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public ListMessage createListMessage(Session ssn)
+    public ListMessage createListMessage()
     {
         // TODO Auto-generated method stub
         return null;

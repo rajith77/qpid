@@ -34,6 +34,7 @@ import javax.jms.Destination;
 import javax.jms.JMSException;
 import javax.jms.Message;
 import javax.jms.MessageFormatException;
+import javax.jms.MessageNotReadableException;
 import javax.jms.MessageNotWriteableException;
 
 import org.apache.qpid.amqp_0_10.jms.AmqpMessage;
@@ -46,17 +47,27 @@ import org.apache.qpid.transport.MessageDeliveryPriority;
 import org.apache.qpid.transport.MessageProperties;
 import org.apache.qpid.transport.ReplyTo;
 
-public class MessageImpl implements AmqpMessage
+public abstract class MessageImpl implements AmqpMessage
 {
-    enum Mode {READABLE, WRITABLE};
-    
+    protected enum Mode
+    {
+        READABLE, WRITABLE
+    };
+
     private static boolean ALLOCATE_DIRECT = Boolean.getBoolean("qpid.allocate-direct");
-    private static final ByteBuffer EMPTY_BYTE_BUFFER = ALLOCATE_DIRECT ? ByteBuffer.allocateDirect(0) : ByteBuffer
+
+    /**
+     * This constant represents the name of a property that is set when the
+     * message payload is null.
+     */
+    protected static final String PAYLOAD_NULL_PROPERTY = CustomJMSXProperty.JMS_AMQP_NULL.toString();
+    
+    protected static final ByteBuffer EMPTY_BYTE_BUFFER = ALLOCATE_DIRECT ? ByteBuffer.allocateDirect(0) : ByteBuffer
             .allocate(0);
+
     private static final int MAX_CACHED_ENTRIES = Integer.getInteger(ClientProperties.QPID_MAX_CACHED_DEST,
             ClientProperties.DEFAULT_MAX_CACHED_DEST);
 
-    // Using two maps as the standard Java API does not provide a Bijective Map 
     @SuppressWarnings("serial")
     private static final Map<ReplyTo, DestinationImpl> REPLY_TO_DEST_CACHE = Collections
             .synchronizedMap(new LinkedHashMap<ReplyTo, DestinationImpl>(MAX_CACHED_ENTRIES + 1, 1.1f, true)
@@ -68,18 +79,6 @@ public class MessageImpl implements AmqpMessage
                 }
 
             });
-
-    @SuppressWarnings("serial")
-    private static final Map<DestinationImpl,ReplyTo> DEST_TO_REPLY_CACHE = Collections
-    .synchronizedMap(new LinkedHashMap<DestinationImpl,ReplyTo>(MAX_CACHED_ENTRIES + 1, 1.1f, true)
-    {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<DestinationImpl,ReplyTo> eldest)
-        {
-            return size() > MAX_CACHED_ENTRIES;
-        }
-
-    });
 
     @SuppressWarnings("rawtypes")
     private static final Set<Class> ALLOWED = new HashSet<Class>();
@@ -96,31 +95,42 @@ public class MessageImpl implements AmqpMessage
         ALLOWED.add(String.class);
         ALLOWED.add(byte[].class);
     }
-    
+
     private final boolean isStrictJMS = Boolean.getBoolean("strict-jms");
+
     private final DeliveryProperties _deliveryProps;
+
     private final MessageProperties _messageProps;
-    private Mode _mode;
+
     private final int _transferId;
+
     private String _messageID = null;
-    private ByteBuffer _data = null;
+    
+    private Mode _propertyReadWriteMode;
+
+    private Mode _contentReadWriteMode;
+
     private SessionImpl _ssn = null;
+
+    private Destination _dest = null;
+
+    private Destination _replyTo = null;
 
     protected MessageImpl()
     {
         _deliveryProps = new DeliveryProperties();
         _messageProps = new MessageProperties();
-        _data = EMPTY_BYTE_BUFFER;
-        _mode = Mode.WRITABLE;
+        _propertyReadWriteMode = Mode.WRITABLE;
+        _contentReadWriteMode = Mode.WRITABLE;
         _transferId = -1;
     }
 
-    protected MessageImpl(SessionImpl ssn, int transferId,DeliveryProperties deliveryProps, MessageProperties msgProps, ByteBuffer data)
+    protected MessageImpl(SessionImpl ssn, int transferId, DeliveryProperties deliveryProps, MessageProperties msgProps)
     {
         _deliveryProps = deliveryProps;
         _messageProps = msgProps;
-        _data = data;
-        _mode = Mode.READABLE;
+        _propertyReadWriteMode = Mode.READABLE;
+        _contentReadWriteMode = Mode.READABLE;
         _transferId = transferId;
     }
 
@@ -138,10 +148,10 @@ public class MessageImpl implements AmqpMessage
         }
     }
 
-    @Override 
+    @Override
     public void clearBody() throws JMSException
     {
-        _data.clear();
+        _contentReadWriteMode = Mode.WRITABLE;
     }
 
     @Override
@@ -241,70 +251,56 @@ public class MessageImpl implements AmqpMessage
     }
 
     @Override
-    public DestinationImpl getJMSReplyTo() throws JMSException
+    public Destination getJMSReplyTo() throws JMSException
     {
-        ReplyTo replyTo = _messageProps.getReplyTo();
-
-        if ((replyTo == null) || ((replyTo.getExchange() == null) && (replyTo.getRoutingKey() == null)))
+        if (_replyTo != null)
         {
-            return null;
+            return _replyTo;
         }
         else
         {
-            DestinationImpl dest = REPLY_TO_DEST_CACHE.get(replyTo);
+            ReplyTo replyTo = _messageProps.getReplyTo();
 
-            if (dest == null)
+            if ((replyTo == null) || ((replyTo.getExchange() == null) && (replyTo.getRoutingKey() == null)))
             {
-                String exchange = replyTo.getExchange();
-                String routingKey = replyTo.getRoutingKey();
-
-                dest = DestinationImpl.createDestination(exchange.concat("/").concat(routingKey));
-                REPLY_TO_DEST_CACHE.put(replyTo, dest);
+                return null;
             }
+            else
+            {
+                DestinationImpl dest = REPLY_TO_DEST_CACHE.get(replyTo);
 
-            return dest;
+                if (dest == null)
+                {
+                    String exchange = replyTo.getExchange();
+                    String routingKey = replyTo.getRoutingKey();
+
+                    dest = DestinationImpl.createDestination(exchange.concat("/").concat(routingKey));
+                    REPLY_TO_DEST_CACHE.put(replyTo, dest);
+                }
+
+                return dest;
+            }
         }
     }
 
     @Override
     public void setJMSReplyTo(Destination dest) throws JMSException
     {
-        if (dest == null)
-        {
-            _messageProps.clearReplyTo();
-            return;
-        }
-
-        if (!(dest instanceof DestinationImpl))
-        {
-            throw new JMSException(
-                    "ReplyTo destination should be of type "+ DestinationImpl.class + " - given argument is of type "
-                            + dest.getClass());
-        }
-        
-        DestinationImpl d = (DestinationImpl)dest;
-        
-        ReplyTo replyTo = DEST_TO_REPLY_CACHE.get(d);
-        if (replyTo == null)
-        {
-            replyTo = new ReplyTo();
-            DEST_TO_REPLY_CACHE.put(d, replyTo);
-        }
-        _messageProps.setReplyTo(replyTo);
+        _replyTo = dest;
     }
 
     @Override
-    public DestinationImpl getJMSDestination() throws JMSException
+    public Destination getJMSDestination() throws JMSException
     {
-        return _destination;
+        return _dest;
     }
 
     @Override
     public void setJMSDestination(Destination destination)
     {
-        _destination = destination;
+        _dest = destination;
     }
-    
+
     @Override
     public int getJMSDeliveryMode() throws JMSException
     {
@@ -381,18 +377,20 @@ public class MessageImpl implements AmqpMessage
     @Override
     public void setJMSType(String arg0) throws JMSException
     {
-        // TODO Auto-generated method stub        
+        // TODO Auto-generated method stub
     }
 
     @Override
     public boolean propertyExists(String propertyName) throws JMSException
     {
-        return (_messageProps.getApplicationHeaders() != null && _messageProps.getApplicationHeaders().containsKey(propertyName));
+        return (_messageProps.getApplicationHeaders() != null && _messageProps.getApplicationHeaders().containsKey(
+                propertyName));
     }
 
     @Override
     public boolean getBooleanProperty(String propertyName) throws JMSException
     {
+        isPropertyReadable();
         checkPropertyName(propertyName);
         Object o = getApplicationProperty(propertyName);
 
@@ -418,9 +416,10 @@ public class MessageImpl implements AmqpMessage
     @Override
     public byte getByteProperty(String propertyName) throws JMSException
     {
+        isPropertyReadable();
         checkPropertyName(propertyName);
         Object o = getApplicationProperty(propertyName);
-        
+
         if (o instanceof Byte)
         {
             return ((Byte) o).byteValue();
@@ -443,6 +442,7 @@ public class MessageImpl implements AmqpMessage
     @Override
     public short getShortProperty(String propertyName) throws JMSException
     {
+        isPropertyReadable();
         checkPropertyName(propertyName);
         Object o = getApplicationProperty(propertyName);
 
@@ -466,12 +466,12 @@ public class MessageImpl implements AmqpMessage
                         + "\") failed as value is not a short: " + o);
             }
         }
-
     }
 
     @Override
     public int getIntProperty(String propertyName) throws JMSException
     {
+        isPropertyReadable();
         checkPropertyName(propertyName);
         Object o = getApplicationProperty(propertyName);
 
@@ -501,6 +501,7 @@ public class MessageImpl implements AmqpMessage
     @Override
     public long getLongProperty(String propertyName) throws JMSException
     {
+        isPropertyReadable();
         checkPropertyName(propertyName);
         Object o = getApplicationProperty(propertyName);
 
@@ -530,6 +531,7 @@ public class MessageImpl implements AmqpMessage
     @Override
     public float getFloatProperty(String propertyName) throws JMSException
     {
+        isPropertyReadable();
         checkPropertyName(propertyName);
         Object o = getApplicationProperty(propertyName);
 
@@ -556,6 +558,7 @@ public class MessageImpl implements AmqpMessage
     @Override
     public double getDoubleProperty(String propertyName) throws JMSException
     {
+        isPropertyReadable();
         checkPropertyName(propertyName);
         Object o = getApplicationProperty(propertyName);
 
@@ -585,6 +588,7 @@ public class MessageImpl implements AmqpMessage
     @Override
     public String getStringProperty(String propertyName) throws JMSException
     {
+        isPropertyReadable();
         if (propertyName.equals(CustomJMSXProperty.JMSXUserID.toString()))
         {
             return new String(_messageProps.getUserId());
@@ -630,6 +634,7 @@ public class MessageImpl implements AmqpMessage
     @Override
     public Object getObjectProperty(String propertyName) throws JMSException
     {
+        isPropertyReadable();
         checkPropertyName(propertyName);
         return getApplicationProperty(propertyName);
     }
@@ -641,7 +646,7 @@ public class MessageImpl implements AmqpMessage
         List<String> props = new ArrayList<String>();
         if (_messageProps.getApplicationHeaders() != null && !_messageProps.getApplicationHeaders().isEmpty())
         {
-            Map<String,Object> map = _messageProps.getApplicationHeaders();
+            Map<String, Object> map = _messageProps.getApplicationHeaders();
             for (String prop : map.keySet())
             {
                 Object value = map.get(prop);
@@ -650,7 +655,7 @@ public class MessageImpl implements AmqpMessage
                     props.add(prop);
                 }
             }
-    
+
             return java.util.Collections.enumeration(props);
         }
         else
@@ -662,66 +667,52 @@ public class MessageImpl implements AmqpMessage
     @Override
     public void setBooleanProperty(String propertyName, boolean b) throws JMSException
     {
-        checkPropertyName(propertyName);
-        checkWritableProperties();
         setApplicationHeader(propertyName, b);
     }
 
     @Override
     public void setByteProperty(String propertyName, byte b) throws JMSException
     {
-        checkPropertyName(propertyName);
-        checkWritableProperties();
         setApplicationHeader(propertyName, b);
     }
 
     @Override
     public void setShortProperty(String propertyName, short i) throws JMSException
     {
-        checkPropertyName(propertyName);
-        checkWritableProperties();
         setApplicationHeader(propertyName, i);
     }
 
     @Override
     public void setIntProperty(String propertyName, int i) throws JMSException
     {
-        checkPropertyName(propertyName);
-        checkWritableProperties();
         setApplicationHeader(propertyName, i);
     }
 
     @Override
     public void setLongProperty(String propertyName, long l) throws JMSException
     {
-        checkPropertyName(propertyName);
-        checkWritableProperties();
         setApplicationHeader(propertyName, l);
     }
 
     @Override
     public void setFloatProperty(String propertyName, float f) throws JMSException
     {
-        checkPropertyName(propertyName);
-        checkWritableProperties();
         setApplicationHeader(propertyName, f);
     }
 
     @Override
     public void setDoubleProperty(String propertyName, double v) throws JMSException
     {
-        checkPropertyName(propertyName);
-        checkWritableProperties();
         setApplicationHeader(propertyName, v);
     }
 
     @Override
     public void setStringProperty(String propertyName, String value) throws JMSException
     {
-        checkPropertyName(propertyName);
-        checkWritableProperties();
         if (QpidMessageProperties.AMQP_0_10_APP_ID.equals(propertyName))
         {
+            checkPropertyName(propertyName);
+            isPropertyWritable();
             _messageProps.setAppId(value.getBytes());
         }
         else
@@ -733,15 +724,14 @@ public class MessageImpl implements AmqpMessage
     @Override
     public void setObjectProperty(String propertyName, Object object) throws JMSException
     {
-        checkPropertyName(propertyName);
-        checkWritableProperties();
         if (object == null)
         {
             throw new MessageFormatException("You cannot set a property value to null");
         }
         else if (!ALLOWED.contains(object.getClass()))
         {
-            throw new MessageFormatException(object.getClass() + " is not an allowed property type. Types allowed are : " + ALLOWED);
+            throw new MessageFormatException(object.getClass()
+                    + " is not an allowed property type. Types allowed are : " + ALLOWED);
         }
         setApplicationHeader(propertyName, object);
     }
@@ -754,7 +744,7 @@ public class MessageImpl implements AmqpMessage
             _messageProps.clearApplicationHeaders();
         }
 
-        _mode = Mode.WRITABLE;
+        _propertyReadWriteMode = Mode.WRITABLE;
     }
 
     void setContentType(String contentType)
@@ -784,20 +774,6 @@ public class MessageImpl implements AmqpMessage
         return _messageProps.getContentEncoding();
     }
 
-    String getReplyToString()
-    {
-        Destination replyTo = getJMSReplyTo();
-        if (replyTo != null)
-        {
-            return ((AMQDestination) replyTo).toString();
-        }
-        else
-        {
-            return null;
-        }
-
-    }
-
     Object getApplicationProperty(String name)
     {
         if (_messageProps.getApplicationHeaders() != null && _messageProps.getApplicationHeaders().containsKey(name))
@@ -810,8 +786,11 @@ public class MessageImpl implements AmqpMessage
         }
     }
 
-    void setApplicationHeader(String propertyName, Object object)
+    void setApplicationHeader(String propertyName, Object object) throws JMSException
     {
+        isPropertyWritable();
+        checkPropertyName(propertyName);
+
         Map<String, Object> headers = _messageProps.getApplicationHeaders();
         if (headers == null)
         {
@@ -821,7 +800,7 @@ public class MessageImpl implements AmqpMessage
         headers.put(propertyName, object);
     }
 
-    void removeProperty(String propertyName) throws JMSException
+    protected void removeProperty(String propertyName) throws JMSException
     {
         Map<String, Object> headers = _messageProps.getApplicationHeaders();
         if (headers != null)
@@ -830,12 +809,47 @@ public class MessageImpl implements AmqpMessage
         }
     }
 
-    protected void checkWritableProperties() throws MessageNotWriteableException
+    protected void isPropertyWritable() throws MessageNotWriteableException
     {
-        if (Mode.WRITABLE != _mode)
+        if (Mode.WRITABLE != _propertyReadWriteMode)
         {
-            throw new MessageNotWriteableException("You need to call clearProperties() to make the message writable");
+            throw new MessageNotWriteableException(
+                    "You need to call clearProperties() to make the message properties writable");
         }
+    }
+
+    protected void isPropertyReadable() throws MessageNotReadableException
+    {
+        if (Mode.READABLE != _propertyReadWriteMode)
+        {
+            throw new MessageNotReadableException("Message properties are in writable mode.");
+        }
+    }
+
+    protected void isContentWritable() throws MessageNotWriteableException
+    {
+        if (Mode.WRITABLE != _contentReadWriteMode)
+        {
+            throw new MessageNotWriteableException("You need to call clearBody() to make the message content writable");
+        }
+    }
+
+    protected void isContentReadable() throws MessageNotReadableException
+    {
+        if (Mode.READABLE != _contentReadWriteMode)
+        {
+            throw new MessageNotReadableException("Message properties are in writable mode.");
+        }
+    }
+
+    protected void setContentReadWriteMode(Mode m)
+    {
+        _contentReadWriteMode = m;
+    }
+
+    protected Mode getContentReadWriteMode()
+    {
+        return _contentReadWriteMode;
     }
 
     void checkPropertyName(CharSequence propertyName) throws JMSException
@@ -852,12 +866,25 @@ public class MessageImpl implements AmqpMessage
         checkIdentiferFormat(propertyName);
     }
 
+    // Set by the provider (after resolving the address) before sending
+    void setAMQPDestination(String exchange, String routingKey)
+    {
+        _deliveryProps.setExchange(exchange);
+        _deliveryProps.setRoutingKey(routingKey);
+    }
+
+    // Set by the provider (after resolving the address) before sending
+    void setAMQPReplyTo(ReplyTo replyTo) throws JMSException
+    {
+        _messageProps.setReplyTo(replyTo);
+    }
+
     void checkIdentiferFormat(CharSequence propertyName)
     {
         // JMS requirements 3.5.1 Property Names
         // Identifiers:
         // - An identifier is an unlimited-length character sequence that must
-        // begin 
+        // begin
         // with a Java identifier start character; all following characters must
         // be Java
         // identifier part characters. An identifier start character is any
@@ -915,17 +942,10 @@ public class MessageImpl implements AmqpMessage
             }
 
             // JMS invalid names
-            if ((propertyName.equals("NULL")
-                 || propertyName.equals("TRUE")
-                 || propertyName.equals("FALSE")
-                 || propertyName.equals("NOT")
-                 || propertyName.equals("AND")
-                 || propertyName.equals("OR")
-                 || propertyName.equals("BETWEEN")
-                 || propertyName.equals("LIKE")
-                 || propertyName.equals("IN")
-                 || propertyName.equals("IS")
-                 || propertyName.equals("ESCAPE")))
+            if ((propertyName.equals("NULL") || propertyName.equals("TRUE") || propertyName.equals("FALSE")
+                    || propertyName.equals("NOT") || propertyName.equals("AND") || propertyName.equals("OR")
+                    || propertyName.equals("BETWEEN") || propertyName.equals("LIKE") || propertyName.equals("IN")
+                    || propertyName.equals("IS") || propertyName.equals("ESCAPE")))
             {
                 throw new IllegalArgumentException("Identifier '" + propertyName + "' is not allowed in JMS");
             }
@@ -942,18 +962,6 @@ public class MessageImpl implements AmqpMessage
     public MessageProperties getMessageProperties()
     {
         return _messageProps;
-    }
-
-    @Override
-    public ByteBuffer getContent()
-    {
-        return _data;
-    }
-
-    @Override
-    public void setContent(ByteBuffer buf)
-    {
-        _data = buf;
     }
 
     @Override

@@ -20,14 +20,40 @@
  */
 package org.apache.qpid.amqp_0_10.jms.impl;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import javax.jms.Destination;
 import javax.jms.JMSException;
 import javax.jms.Message;
 import javax.jms.MessageProducer;
 
+import org.apache.qpid.configuration.ClientProperties;
+import org.apache.qpid.transport.ReplyTo;
+import org.apache.qpid.transport.util.Logger;
+
 public class MessageProducerImpl implements MessageProducer
 {
+    private static final Logger _logger = Logger.get(MessageProducerImpl.class);
 
+    private static final int MAX_CACHED_ENTRIES = Integer.getInteger(ClientProperties.QPID_MAX_CACHED_DEST,
+            ClientProperties.DEFAULT_MAX_CACHED_DEST);
+
+    @SuppressWarnings("serial")
+    private static final Map<DestinationImpl, ReplyTo> DEST_TO_REPLY_CACHE = Collections
+            .synchronizedMap(new LinkedHashMap<DestinationImpl, ReplyTo>(MAX_CACHED_ENTRIES + 1, 1.1f, true)
+            {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<DestinationImpl, ReplyTo> eldest)
+                {
+                    return size() > MAX_CACHED_ENTRIES;
+                }
+
+            });
+
+    private final SessionImpl _session;
+    
     @Override
     public void close() throws JMSException
     {
@@ -144,6 +170,31 @@ public class MessageProducerImpl implements MessageProducer
     {
         // TODO Auto-generated method stub
         
+    }
+    
+    void setReplyTo(MessageImpl m) throws JMSException
+    {
+        if (m.getJMSReplyTo() == null)
+        {
+            m.getMessageProperties().clearReplyTo();
+            return;
+        }
+
+        if (!(m.getJMSReplyTo() instanceof DestinationImpl))
+        {
+            throw new JMSException("ReplyTo destination should be of type " + DestinationImpl.class
+                    + " - given argument is of type " + m.getJMSReplyTo().getClass());
+        }
+
+        DestinationImpl d = (DestinationImpl) m.getJMSReplyTo();
+
+        ReplyTo replyTo = DEST_TO_REPLY_CACHE.get(d);
+        if (replyTo == null)
+        {
+            replyTo = AddressResolution.getReplyTo(_session,d);
+            DEST_TO_REPLY_CACHE.put(d, replyTo);
+        }
+        m.getMessageProperties().setReplyTo(replyTo);
     }
 
 }

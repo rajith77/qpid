@@ -40,17 +40,17 @@ public interface MessageFactory
         BINARY, STRING, MAP, LIST
     }
 
-    public Message createMessage(Session ssn);
+    public Message createMessage();
 
-    public TextMessage createTextMessage(Session ssn);
+    public TextMessage createTextMessage();
 
-    public MapMessage createMapMessage(Session ssn);
+    public MapMessage createMapMessage();
 
-    public ObjectMessage createObjectMessage(Session ssn);
+    public ObjectMessage createObjectMessage();
 
-    public StreamMessage createStreamMessage(Session ssn);
+    public StreamMessage createStreamMessage();
 
-    public ListMessage createListMessage(Session ssn);
+    public ListMessage createListMessage();
 
     public Message createMessage(Session ssn, DeliveryProperties deliveryProps, MessageProperties msgProps,
             ByteBuffer data);

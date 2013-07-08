@@ -19,6 +19,8 @@ package org.apache.qpid.amqp_0_10.jms;
 
 import java.nio.ByteBuffer;
 
+import javax.jms.JMSException;
+
 import org.apache.qpid.transport.DeliveryProperties;
 import org.apache.qpid.transport.MessageProperties;
 
@@ -30,7 +32,5 @@ public interface AmqpMessage extends javax.jms.Message
 
     public MessageProperties getMessageProperties();
     
-    public ByteBuffer getContent();
-    
-    public void setContent(ByteBuffer buf);
+    public ByteBuffer getContent() throws JMSException;
 }
