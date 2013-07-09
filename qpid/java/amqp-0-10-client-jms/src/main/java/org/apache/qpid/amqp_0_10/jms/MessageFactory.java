@@ -37,7 +37,7 @@ public interface MessageFactory
      */
     public enum MessageType
     {
-        BINARY, STRING, MAP, LIST
+        BINARY, STRING, MAP, LIST, JAVA_OBJECT
     }
 
     public Message createMessage();

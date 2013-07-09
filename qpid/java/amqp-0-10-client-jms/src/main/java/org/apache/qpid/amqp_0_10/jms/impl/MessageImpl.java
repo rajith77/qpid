@@ -552,7 +552,6 @@ public abstract class MessageImpl implements AmqpMessage
         {
             throw new NullPointerException("No such property: " + propertyName);
         }
-
     }
 
     @Override
@@ -826,7 +825,7 @@ public abstract class MessageImpl implements AmqpMessage
         }
     }
 
-    protected void isContentWritable() throws MessageNotWriteableException
+    protected void isContentWritable() throws JMSException
     {
         if (Mode.WRITABLE != _contentReadWriteMode)
         {
@@ -834,7 +833,7 @@ public abstract class MessageImpl implements AmqpMessage
         }
     }
 
-    protected void isContentReadable() throws MessageNotReadableException
+    protected void isContentReadable() throws JMSException
     {
         if (Mode.READABLE != _contentReadWriteMode)
         {
@@ -852,7 +851,7 @@ public abstract class MessageImpl implements AmqpMessage
         return _contentReadWriteMode;
     }
 
-    void checkPropertyName(CharSequence propertyName) throws JMSException
+    protected void checkPropertyName(CharSequence propertyName) throws JMSException
     {
         if (propertyName == null)
         {

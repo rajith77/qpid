@@ -211,6 +211,12 @@ public class ClientProperties
     public static final String QPID_MAX_CACHED_DEST = "qpid.max_cached_destinations";
     public static final int DEFAULT_MAX_CACHED_DEST = 10;
 
+    public static final String QPID_MAP_MESSAGE_CAPACITY = "qpid.map_msg_capacity";
+    public static final int DEFAULT_MAP_MESSAGE_CAPACITY = 5;
+
+    public static final String QPID_LIST_MESSAGE_CAPACITY = "qpid.list_msg_capacity";
+    public static final int DEFAULT_LIST_MESSAGE_CAPACITY = 5;
+
     private ClientProperties()
     {
         //No instances

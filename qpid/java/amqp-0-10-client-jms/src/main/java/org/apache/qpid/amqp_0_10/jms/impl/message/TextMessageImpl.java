@@ -29,7 +29,6 @@ import javax.jms.TextMessage;
 
 import org.apache.qpid.amqp_0_10.jms.impl.MessageImpl;
 import org.apache.qpid.amqp_0_10.jms.impl.SessionImpl;
-import org.apache.qpid.client.CustomJMSXProperty;
 import org.apache.qpid.transport.DeliveryProperties;
 import org.apache.qpid.transport.MessageProperties;
 import org.apache.qpid.util.ExceptionHelper;
@@ -38,22 +37,22 @@ public class TextMessageImpl extends MessageImpl implements TextMessage
 {
     private static final Charset DEFAULT_CHARSET = Charset.forName("UTF-8");
 
-    private static final String EMPTY_PAYLOAD = "";
+    private CharsetDecoder _decoder;
 
-    private CharsetDecoder _decoder = DEFAULT_CHARSET.newDecoder();
-
-    private CharsetEncoder _encoder = DEFAULT_CHARSET.newEncoder();
+    private CharsetEncoder _encoder;
 
     private JMSException _exception;
 
     private String _decodedValue;
 
-    public TextMessageImpl()
+    TextMessageImpl()
     {
         super();
         try
         {
             setBooleanProperty(PAYLOAD_NULL_PROPERTY, true);
+            getMessageProperties().setContentType("text/plain");
+            getMessageProperties().setContentEncoding("UTF-8");
         }
         catch (JMSException e)
         {
@@ -61,22 +60,19 @@ public class TextMessageImpl extends MessageImpl implements TextMessage
         }
     }
 
-    public TextMessageImpl(SessionImpl ssn, int transferId, DeliveryProperties deliveryProps,
-            MessageProperties msgProps, ByteBuffer data)
+    TextMessageImpl(SessionImpl ssn, int transferId, DeliveryProperties deliveryProps, MessageProperties msgProps,
+            ByteBuffer data)
     {
         super(ssn, transferId, deliveryProps, msgProps);
         try
         {
-            if (propertyExists(PAYLOAD_NULL_PROPERTY))
+            if (propertyExists(PAYLOAD_NULL_PROPERTY) || data == null || data.remaining() == 0)
             {
                 _decodedValue = null;
             }
-            else if (data.remaining() == 0)
-            {
-                _decodedValue = EMPTY_PAYLOAD;
-            }
             else
             {
+                _decoder = DEFAULT_CHARSET.newDecoder();
                 _decodedValue = _decoder.decode(data).toString();
             }
         }
@@ -93,7 +89,6 @@ public class TextMessageImpl extends MessageImpl implements TextMessage
     @Override
     public ByteBuffer getContent() throws JMSException
     {
-        _encoder.reset();
         try
         {
             if (_exception != null)
@@ -106,6 +101,8 @@ public class TextMessageImpl extends MessageImpl implements TextMessage
             }
             else
             {
+                _encoder = DEFAULT_CHARSET.newEncoder();
+                _encoder.reset();
                 return _encoder.encode(CharBuffer.wrap(_decodedValue));
             }
         }
