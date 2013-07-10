@@ -90,8 +90,6 @@ public class MessageProducerImpl implements MessageProducer
 
     private final boolean _isReplayRequired;
 
-    private final Map<Integer,MessageTransfer> _replayQueue;
-
     private final AtomicBoolean _closed = new AtomicBoolean(false);
 
     private final ConditionManager _msgSendingInProgress = new ConditionManager(false);
@@ -107,6 +105,8 @@ public class MessageProducerImpl implements MessageProducer
     private boolean _disableTimestamp = false;
 
     private long _ttl = 0;
+
+    private int _count = 0;
 
     protected MessageProducerImpl(SessionImpl ssn, Destination dest) throws JMSException
     {
@@ -131,14 +131,6 @@ public class MessageProducerImpl implements MessageProducer
         _capacity = AddressResolution.evaluateCapacity(defaultCapacity, _dest, CheckMode.SENDER);
 
         _isReplayRequired = AddressResolution.isReplayRequired(_dest);
-        if (!_syncPublish && _isReplayRequired)
-        {
-            _replayQueue = new HashMap<Integer,MessageTransfer>(_capacity);
-        }
-        else
-        {
-            _replayQueue = Collections.emptyMap();
-        }
 
         _logger.debug("Sucessfully created message producer for : " + dest);
     }
@@ -266,13 +258,16 @@ public class MessageProducerImpl implements MessageProducer
                             : NONE);
 
             _session.getAMQPSession().invoke(transfer);
-            if (sync)
+            _count++;
+
+            if (sync || _count >= _capacity)
             {
                 _session.getAMQPSession().sync();
+                _count = 0;
             }
             else if (_isReplayRequired)
             {
-                _replayQueue.put(transfer.getId(), transfer);
+                _session.addToReplayQueue(transfer);
             }
         }
         catch (Exception e)
@@ -401,6 +396,11 @@ public class MessageProducerImpl implements MessageProducer
     void updateFiledsInForeignMsg(Message msg, MessageImpl message)
     {
         // TODO Auto-generated method stub
+    }
+
+    void waitForSenderToComplete()
+    {
+        _msgSendingInProgress.waitUntilFalse();
     }
 
     private void checkClosed() throws JMSException

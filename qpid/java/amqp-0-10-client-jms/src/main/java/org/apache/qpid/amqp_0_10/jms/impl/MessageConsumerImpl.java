@@ -59,8 +59,6 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private final boolean _noLocal;
 
-    private final String _subscriptionQueue;
-
     private final int _capacity;
 
     private final String _consumerTag;
@@ -77,9 +75,11 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private final ConditionManager _msgDeliveryInProgress = new ConditionManager(false);
 
-    private final ConditionManager _msgDeliveryStopped = new ConditionManager(false);
+    private final ConditionManager _msgDeliveryStopped = new ConditionManager(true);
 
     private final AtomicBoolean _closeFromOnMessage = new AtomicBoolean(false);
+
+    private String _subscriptionQueue;
 
     private volatile MessageListener _msgListener;
 
@@ -117,10 +117,15 @@ public class MessageConsumerImpl implements MessageConsumer
             break;
         }
 
+        createSubscription();
+    }
+
+    void createSubscription() throws JMSException
+    {
         try
         {
-            _subscriptionQueue = AddressResolution.verifyAndCreateSubscription(ssn, _dest, consumerTag, ackMode,
-                    noLocal);
+            _subscriptionQueue = AddressResolution.verifyAndCreateSubscription(_session, _dest, _consumerTag, _ackMode,
+                    _noLocal);
             setMessageFlowMode();
             setMessageCredit(_capacity);
             _session.getAMQPSession().sync();
@@ -129,7 +134,7 @@ public class MessageConsumerImpl implements MessageConsumer
         {
             throw ExceptionHelper.toJMSException("Error creating consumer.", se);
         }
-        _logger.debug("Sucessfully created message consumer for : " + dest);
+        _logger.debug("Sucessfully created message consumer for : " + _dest);
     }
 
     @Override
@@ -181,7 +186,14 @@ public class MessageConsumerImpl implements MessageConsumer
         {
             _closed.set(true);
             _session.removeConsumer(this);
-            waitForInProgressDeliveriesToStop();
+            if (_msgDeliveryStopped.getCurrentValue())
+            {
+                // wake up anything waiting on _msgDeliveryStopped and return.
+            }
+            else
+            {
+                waitForInProgressDeliveriesToStop();
+            }
             cancelSubscription();
             releaseMessages();
             AddressResolution.cleanupForConsumer(_session, _dest, _subscriptionQueue);
@@ -209,12 +221,16 @@ public class MessageConsumerImpl implements MessageConsumer
     MessageImpl receiveImpl(long timeout) throws JMSException
     {
         checkClosed();
-        long remaining = preSyncReceive(timeout);
-
-        if (!isStarted())
+        if (_msgListener != null)
         {
-            _msgDeliveryStopped.waitUntilFalse();
-            // Time out waiting for connection to start.
+            throw new IllegalStateException("A listener has already been set.");
+        }
+
+        long remaining = timeout;
+        if (_msgDeliveryStopped.getCurrentValue())
+        {
+            remaining =_msgDeliveryStopped.waitUntilFalse(remaining);
+            // Time out waiting for message delivery to start.
             if (remaining < 0)
             {
                 return null;
@@ -351,47 +367,16 @@ public class MessageConsumerImpl implements MessageConsumer
         }
     }
 
-    void commit() throws JMSException
-    {
-        checkClosed();
-        sendMessageAccept(false);
-    }
-
-    void rollback() throws JMSException
-    {
-        checkClosed();
-        _msgDeliveryStopped.setValueAndNotify(true);
-        try
-        {
-            waitForInProgressDeliveriesToStop();
-            requeueUnackedMessages();
-        }
-        finally
-        {
-            _msgDeliveryStopped.setValueAndNotify(false);
-        }
-    }
-
-    void recover() throws JMSException
-    {
-        rollback();
-    }
-
-    void startMessageDelivery() throws JMSException
+    void start() throws JMSException
     {
         setMessageCredit(_capacity);
-        _msgDeliveryStopped.setValueAndNotify(false);
+        startMessageDelivery();
     }
 
-    /*
-     * When this method returns, this consumer will not deliver any messages (in
-     * it's local queue) via it's MessageListener or the receive methods. The
-     * session impl will sync once it issues a stop on all it's consumers.
-     */
-    void stopMessageDelivery() throws JMSException
+    // The session impl will sync once it issues a stop on all it's consumers.
+    void stop() throws JMSException
     {
-        _msgDeliveryStopped.setValueAndNotify(true);
-        waitForInProgressDeliveriesToStop();
+        stopMessageDelivery();
         try
         {
             _session.getAMQPSession().messageStop(_consumerTag, Option.UNRELIABLE);
@@ -400,6 +385,25 @@ public class MessageConsumerImpl implements MessageConsumer
         {
             throw ExceptionHelper.toJMSException("Error sending message.stop.", e);
         }
+    }
+
+    /*
+     * Will start delivering messages in it's local queue via ML or receive
+     * methods.
+     */
+    void startMessageDelivery()
+    {
+        _msgDeliveryStopped.setValueAndNotify(false);
+    }
+
+    /*
+     * When this method returns, this consumer will not deliver any messages (in
+     * it's local queue) via it's MessageListener or the receive methods.
+     */
+    void stopMessageDelivery()
+    {        
+        waitForInProgressDeliveriesToStop();
+        _msgDeliveryStopped.setValueAndNotify(true);
     }
 
     void requeueUnackedMessages() throws JMSException
@@ -558,6 +562,7 @@ public class MessageConsumerImpl implements MessageConsumer
                     _session.getAMQPSession()
                             .messageFlow(_consumerTag, MessageCreditUnit.MESSAGE, 1, Option.UNRELIABLE);
                 }
+                startMessageDelivery();
             }
         }
         catch (Exception e)
@@ -612,7 +617,7 @@ public class MessageConsumerImpl implements MessageConsumer
     {
         try
         {
-            _session.getAMQPSession().sync(0);
+            _session.getAMQPSession().sync(timeout);
         }
         catch (Exception e)
         {
@@ -627,33 +632,6 @@ public class MessageConsumerImpl implements MessageConsumer
             throw new IllegalStateException("Consumer is closed");
         }
         _session.checkClosed();
-    }
-
-    private long preSyncReceive(long timeout) throws JMSException
-    {
-        if (_msgListener != null)
-        {
-            throw new IllegalStateException("A listener has already been set.");
-        }
-
-        long remaining = timeout;
-        while (_session.getConnection().isFailoverInProgress() && remaining >= 0)
-        {
-            try
-            {
-                remaining = _session.getConnection().waitForFailoverToComplete(remaining);
-            }
-            catch (InterruptedException e)
-            {
-                _logger.warn(e, "Consumer sync receive interrupted while waiting for failover to complete");
-            }
-        }
-        if (_session.getConnection().isFailoverInProgress() && remaining < 0)
-        {
-            throw new JMSException("Timeout waiting for connection to failover");
-        }
-
-        return remaining;
     }
 
     private boolean isMessageListener()

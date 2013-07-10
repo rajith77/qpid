@@ -35,6 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.jms.BytesMessage;
 import javax.jms.Destination;
 import javax.jms.IllegalStateException;
+import javax.jms.InvalidDestinationException;
 import javax.jms.JMSException;
 import javax.jms.MapMessage;
 import javax.jms.Message;
@@ -59,7 +60,9 @@ import javax.jms.TopicSubscriber;
 
 import org.apache.qpid.amqp_0_10.jms.MessageFactory;
 import org.apache.qpid.client.JmsNotImplementedException;
+import org.apache.qpid.configuration.ClientProperties;
 import org.apache.qpid.transport.ConnectionException;
+import org.apache.qpid.transport.MessageTransfer;
 import org.apache.qpid.transport.SessionException;
 import org.apache.qpid.transport.util.Logger;
 import org.apache.qpid.util.ExceptionHelper;
@@ -109,9 +112,8 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private final AcknowledgeMode _ackMode;
 
-    private long _maxAckDelay = Long.getLong("qpid.session.max_ack_delay", 5 * 60000);
-
-    private TimerTask _flushTask = null;
+    private final long _maxAckDelay = Long.getLong(ClientProperties.QPID_SESSION_MAX_ACK_DELAY,
+            ClientProperties.DEFAULT_SESSION_MAX_ACK_DELAY);
 
     private final List<MessageProducerImpl> _producers = new ArrayList<MessageProducerImpl>(2);
 
@@ -121,18 +123,28 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private final MessageFactory _messageFactory;
 
+    private final Map<Integer, MessageTransfer> _replayQueue;
+
+    private TimerTask _flushTask = null;
+
     protected SessionImpl(ConnectionImpl conn, int ackMode) throws JMSException
     {
         _conn = conn;
         _ackMode = AcknowledgeMode.getAckMode(ackMode);
         createProtocolSession();
+
         if (AcknowledgeMode.DUPS_OK == _ackMode && _maxAckDelay > 0)
         {
             _flushTask = new Flusher(this);
             timer.schedule(_flushTask, new Date(), _maxAckDelay);
         }
+
         // Message factory could be a connection property if need be.
         _messageFactory = MessageFactorySupport.getMessageFactory(null);
+
+        _replayQueue = new HashMap<Integer, MessageTransfer>(Integer.getInteger(
+                ClientProperties.QPID_SESSION_REPLAY_QUEUE_CAPACITY,
+                ClientProperties.DEFAULT_SESSION_REPLAY_QUEUE_CAPACITY));
     }
 
     private void createProtocolSession() throws JMSException
@@ -159,12 +171,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         catch (SessionException se)
         {
             ExceptionHelper.toJMSException("Error marking protocol session as transacted", se);
-        }
-
-        if (_maxAckDelay > 0)
-        {
-            _flushTask = new Flusher(this);
-            timer.schedule(_flushTask, new Date(), _maxAckDelay);
         }
     }
 
@@ -217,7 +223,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
         for (MessageConsumerImpl cons : _consumers.values())
         {
-            cons.commit();
+            cons.sendMessageAccept(false);
         }
 
         try
@@ -241,7 +247,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
         for (MessageConsumerImpl cons : _consumers.values())
         {
-            cons.rollback();
+            cons.stopMessageDelivery();
         }
 
         try
@@ -255,6 +261,12 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             closed();
             throw ExceptionHelper.toJMSException("Rollback failed due to error", se);
         }
+
+        for (MessageConsumerImpl cons : _consumers.values())
+        {
+            cons.requeueUnackedMessages();
+            cons.startMessageDelivery();
+        }
     }
 
     @Override
@@ -262,20 +274,46 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     {
         checkClosed();
         checkNotTransactional();
+
+        for (MessageConsumerImpl cons : _consumers.values())
+        {
+            cons.stopMessageDelivery();
+        }
+
+        for (MessageConsumerImpl cons : _consumers.values())
+        {
+            cons.requeueUnackedMessages();
+            cons.startMessageDelivery();
+        }
     }
 
-    public void start()
+    void start() throws JMSException
     {
-        // TODO Auto-generated method stub
-
+        for (MessageConsumerImpl cons : _consumers.values())
+        {
+            cons.start();
+        }
     }
 
-    public void stop()
+    void stop() throws JMSException
     {
-        // TODO Auto-generated method stub
+        for (MessageConsumerImpl cons : _consumers.values())
+        {
+            cons.stop();
+        }
 
+        try
+        {
+            getAMQPSession().sync();
+        }
+        catch (Exception e)
+        {
+            throw ExceptionHelper.toJMSException("Error waiting for message stopped to complete", e);
+        }
+        // TODO is there a requirement to drain the queues and release messages
+        // in internal queues ?
     }
-
+    
     @Override
     public MessageProducer createProducer(Destination dest) throws JMSException
     {
@@ -300,9 +338,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     public MessageConsumer createConsumer(Destination dest, String selector, boolean noLocal) throws JMSException
     {
         String tag = String.valueOf(_consumerTag.incrementAndGet());
-
         MessageConsumerImpl cons = new MessageConsumerImpl(tag, this, dest, selector, noLocal, false, _ackMode);
-
         _consumers.put(tag, cons);
 
         return cons;
@@ -354,15 +390,22 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public TopicSubscriber createSubscriber(Topic topic) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return createSubscriber(topic, null, false);
     }
 
     @Override
-    public TopicSubscriber createSubscriber(Topic topic, String messageSelector, boolean noLocal) throws JMSException
+    public TopicSubscriber createSubscriber(Topic topic, String selector, boolean noLocal) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        if (!(topic instanceof TopicImpl))
+        {
+            throw new InvalidDestinationException("Invalid Topic Class" + topic.getClass().getName());
+        }
+
+        String tag = String.valueOf(_consumerTag.incrementAndGet());
+        TopicSubscriberImpl cons = new TopicSubscriberImpl(tag, this, topic, selector, noLocal, false, _ackMode);
+        _consumers.put(tag, cons);
+
+        return cons;
     }
 
     @Override
@@ -494,19 +537,29 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
     }
 
-    protected void removeProducer(MessageProducerImpl prod)
+    void removeProducer(MessageProducerImpl prod)
     {
         _producers.remove(prod);
     }
 
-    protected void removeConsumer(MessageConsumerImpl cons)
+    void removeConsumer(MessageConsumerImpl cons)
     {
         _consumers.remove(cons);
     }
 
-    protected org.apache.qpid.transport.Session getAMQPSession()
+    org.apache.qpid.transport.Session getAMQPSession()
     {
         return _amqpSession;
+    }
+
+    void acknowledgeMesages()
+    {
+
+    }
+
+    void addToReplayQueue(MessageTransfer msg)
+    {
+        _replayQueue.put(msg.getId(), msg);
     }
 
     private void flushPendingAcknowledgements() throws JMSException
@@ -562,10 +615,4 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         checkClosed();
         throw new JmsNotImplementedException();
     }
-
-    void acknowledgeMesages()
-    {
-
-    }
-
 }
