@@ -96,6 +96,8 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     private final ConnectionMetaDataImpl _metaData = new ConnectionMetaDataImpl();
 
+    private final ConnectionConfig _config;
+
     private String _clientId;
 
     private volatile ExceptionListener _exceptionListener;
@@ -105,6 +107,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         _url = url;
         _amqpConnection = new org.apache.qpid.transport.Connection();
         _amqpConnection.addConnectionListener(this);
+        _config = new ConnectionConfig(url);
     }
 
     private void connect(ConnectionSettings conSettings) throws JMSException
@@ -395,6 +398,11 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         {
             _conditionLock.unlock();
         }
+    }
+
+    ConnectionConfig getConfig()
+    {
+        return _config;
     }
 
     private ConnectionSettings retrieveConnectionSettings(BrokerDetails brokerDetail)

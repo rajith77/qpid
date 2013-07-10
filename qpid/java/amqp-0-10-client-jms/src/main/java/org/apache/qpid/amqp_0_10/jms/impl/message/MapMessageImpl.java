@@ -41,20 +41,25 @@ import org.apache.qpid.transport.codec.BBDecoder;
 import org.apache.qpid.transport.codec.BBEncoder;
 import org.apache.qpid.util.ExceptionHelper;
 
-public class MapMessageImpl extends MessageImpl implements MapMessage
+public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTypes
 {
     private final static int MAP_MESSAGE_CAPACITY = Integer.getInteger(ClientProperties.QPID_MAP_MESSAGE_CAPACITY,
             ClientProperties.DEFAULT_MAP_MESSAGE_CAPACITY);
+
     private BBDecoder _decoder = null;
+
     private BBEncoder _encoder = null;
-    private ByteBuffer _encodedValue = null;
+
+    private ByteBuffer _encodedBytes = null;
+
     private JMSException _exception = null;
+
     private Map<String, Object> _map;
 
-    MapMessageImpl() throws JMSException
+    MapMessageImpl()
     {
         super();
-        getMessageProperties().setContentType("amqp-0-10/map");
+        getMessageProperties().setContentType(AMQP_0_10_MAP);
         _map = new HashMap<String, Object>(MAP_MESSAGE_CAPACITY);
     }
 
@@ -78,6 +83,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage
                 _decoder = new BBDecoder();
                 _decoder.init(data);
                 _map = _decoder.readMap();
+                _encodedBytes = data;
             }
         }
         catch (JMSException e)
@@ -93,11 +99,15 @@ public class MapMessageImpl extends MessageImpl implements MapMessage
     @Override
     public ByteBuffer getContent() throws JMSException
     {
-        if (_encodedValue == null)
+        if (_exception != null)
+        {
+            throw _exception;
+        }
+        if (_encodedBytes == null)
         {
             if (_map.size() == 0)
             {
-                _encodedValue = EMPTY_BYTE_BUFFER;
+                _encodedBytes = EMPTY_BYTE_BUFFER;
             }
             else
             {
@@ -105,7 +115,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage
                 {
                     _encoder = new BBEncoder(1024);
                     _encoder.writeMap(_map);
-                    _encodedValue = _encoder.segment();
+                    _encodedBytes = _encoder.segment();
                 }
                 catch (Exception e)
                 {
@@ -113,7 +123,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage
                 }
             }
         }
-        return _encodedValue;
+        return _encodedBytes;
     }
 
     @Override
@@ -121,7 +131,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage
     {
         super.clearBody();
         _map.clear();
-        _encodedValue = null;
+        _encodedBytes = null;
         _exception = null;
     }
 
@@ -152,8 +162,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage
         }
         else if (_map.containsKey(name))
         {
-            throw new MessageFormatException("getBooleanProperty(\"" + name + "\") failed as value is not boolean: "
-                    + o);
+            throw new MessageFormatException("getBoolean(\"" + name + "\") failed as value is not boolean: " + o);
         }
         else
         {
@@ -178,7 +187,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage
         }
         else if (_map.containsKey(name))
         {
-            throw new MessageFormatException("getByteProperty(\"" + name + "\") failed as value is not a byte: " + o);
+            throw new MessageFormatException("getByte(\"" + name + "\") failed as value is not a byte: " + o);
         }
         else
         {
@@ -189,19 +198,21 @@ public class MapMessageImpl extends MessageImpl implements MapMessage
     @Override
     public byte[] getBytes(String name) throws JMSException
     {
-        Object value = _map.get(name);
+        isContentReadable();
+        checkPropertyName(name);
+        Object o = _map.get(name);
 
         if (!_map.containsKey(name))
         {
             throw new MessageFormatException("Property '" + name + "' not present");
         }
-        else if ((value instanceof byte[]) || (value == null))
+        else if ((o instanceof byte[]) || (o == null))
         {
-            return (byte[]) value;
+            return (byte[]) o;
         }
         else
         {
-            throw new MessageFormatException("Property " + name + " of type " + value.getClass().getName()
+            throw new MessageFormatException("Property " + name + " of type " + o.getClass().getName()
                     + " cannot be converted to byte[].");
         }
     }
@@ -229,7 +240,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage
         else
         {
             throw new MessageFormatException("Property " + name + " of type " + o.getClass().getName()
-                    + " cannot be converted to boolan.");
+                    + " cannot be converted to char.");
         }
     }
 
@@ -256,8 +267,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage
             }
             catch (MessageFormatException e)
             {
-                throw new MessageFormatException("getDoubleProperty(\"" + name
-                        + "\") failed as value is not a double: " + o);
+                throw new MessageFormatException("getDouble(\"" + name + "\") failed as value is not a double: " + o);
             }
         }
     }
@@ -279,7 +289,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage
         }
         else if (_map.containsKey(name))
         {
-            throw new MessageFormatException("getFloatProperty(\"" + name + "\") failed as value is not a float: " + o);
+            throw new MessageFormatException("getFloat(\"" + name + "\") failed as value is not a float: " + o);
         }
         else
         {
@@ -310,7 +320,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage
             }
             catch (MessageFormatException e)
             {
-                throw new MessageFormatException("getIntProperty(\"" + name + "\") failed as value is not an int: " + o);
+                throw new MessageFormatException("getInt(\"" + name + "\") failed as value is not an int: " + o);
             }
 
         }
@@ -390,8 +400,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage
             }
             catch (MessageFormatException e)
             {
-                throw new MessageFormatException("getShortProperty(\"" + name + "\") failed as value is not a short: "
-                        + o);
+                throw new MessageFormatException("getShort(\"" + name + "\") failed as value is not a short: " + o);
             }
         }
     }
@@ -534,7 +543,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage
         else
         {
             throw new MessageFormatException("Cannot set property " + propName + " to value " + value + "of type "
-                    + value.getClass().getName() + ".");
+                    + value.getClass().getName() + ", as it's not an allowed type");
         }
     }
 

@@ -61,7 +61,7 @@ public abstract class MessageImpl implements AmqpMessage
      * message payload is null.
      */
     protected static final String PAYLOAD_NULL_PROPERTY = CustomJMSXProperty.JMS_AMQP_NULL.toString();
-    
+
     protected static final ByteBuffer EMPTY_BYTE_BUFFER = ALLOCATE_DIRECT ? ByteBuffer.allocateDirect(0) : ByteBuffer
             .allocate(0);
 
@@ -105,7 +105,7 @@ public abstract class MessageImpl implements AmqpMessage
     private final int _transferId;
 
     private String _messageID = null;
-    
+
     private Mode _propertyReadWriteMode;
 
     private Mode _contentReadWriteMode;
@@ -283,10 +283,19 @@ public abstract class MessageImpl implements AmqpMessage
         }
     }
 
+    Destination getReplyToForSending()
+    {
+        return _replyTo;
+    }
+
     @Override
     public void setJMSReplyTo(Destination dest) throws JMSException
     {
         _replyTo = dest;
+        if (dest == null)
+        {
+            _messageProps.clearReplyTo();
+        }
     }
 
     @Override

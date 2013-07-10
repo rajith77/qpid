@@ -2,7 +2,7 @@ package org.apache.qpid.util;
 
 import javax.jms.JMSException;
 
-import org.apache.qpid.client.message.MessageFactory;
+import org.apache.qpid.amqp_0_10.jms.MessageFactory;
 
 public class MessageFactorySupport
 {

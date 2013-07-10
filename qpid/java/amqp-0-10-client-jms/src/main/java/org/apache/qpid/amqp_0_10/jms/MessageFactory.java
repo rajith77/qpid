@@ -19,6 +19,7 @@ package org.apache.qpid.amqp_0_10.jms;
 
 import java.nio.ByteBuffer;
 
+import javax.jms.BytesMessage;
 import javax.jms.MapMessage;
 import javax.jms.Message;
 import javax.jms.ObjectMessage;
@@ -42,6 +43,8 @@ public interface MessageFactory
 
     public Message createMessage();
 
+    public BytesMessage createBytesMessage();
+
     public TextMessage createTextMessage();
 
     public MapMessage createMapMessage();
@@ -52,8 +55,8 @@ public interface MessageFactory
 
     public ListMessage createListMessage();
 
-    public Message createMessage(Session ssn, DeliveryProperties deliveryProps, MessageProperties msgProps,
-            ByteBuffer data);
+    public Message createMessage(Session ssn, int transferId, DeliveryProperties deliveryProps,
+            MessageProperties msgProps, ByteBuffer data);
 
     /**
      * You could use this method to map your custom content-type to one of the
@@ -63,7 +66,7 @@ public interface MessageFactory
      * Ex. foo/bar -> STRING, will tell the client to treat any message that has
      * the content-type foo/bar to be treated as a STRING Message.
      * 
-     * Currently supported content types are as follows.
+     * The implementation provides the following default mappings.
      * <ul>
      * <li>default - BINARY</li>
      * <li>application/octet-stream - BINARY</li>
@@ -73,6 +76,7 @@ public interface MessageFactory
      * <li>amqp-0-10/map - MAP</li>
      * <li>amqp/list - LIST</li>
      * <li>amqp-0-10/list - LIST</li>
+     * <li>application/java-object-stream - JAVA_OBJECT</li>
      * 
      * @param contentType
      *            The content type you want to register.

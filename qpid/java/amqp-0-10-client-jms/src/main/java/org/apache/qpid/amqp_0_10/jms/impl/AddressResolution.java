@@ -31,6 +31,7 @@ import org.apache.qpid.address.Binding;
 import org.apache.qpid.address.Link;
 import org.apache.qpid.address.Node;
 import org.apache.qpid.address.NodeType;
+import org.apache.qpid.address.Reliability;
 import org.apache.qpid.address.SubscriptionQueue;
 import org.apache.qpid.transport.ExchangeBoundResult;
 import org.apache.qpid.transport.ExchangeQueryResult;
@@ -59,25 +60,28 @@ public class AddressResolution
         QUEUE, EXCHANGE, AMBIGUOUS, NOT_FOUND
     };
 
-    public static String verifyAndCreateSubscription(SessionImpl ssn, DestinationImpl dest, String consumerId, AcknowledgeMode ackMode, boolean noLocal) throws JMSException
+    public static String verifyAndCreateSubscription(SessionImpl ssn, DestinationImpl dest, String consumerId,
+            AcknowledgeMode ackMode, boolean noLocal) throws JMSException
     {
         NodeType nodeType = AddressResolution.resolveDestination(ssn, dest, CheckMode.RECEIVER);
         String subscriptionQueue;
         if (NodeType.TOPIC == nodeType)
         {
             subscriptionQueue = AddressResolution.createSubscriptionQueue(ssn, dest, noLocal);
+            handleLinkCreation(ssn, dest, dest.getAddress().getName(), subscriptionQueue);
         }
         else
         {
             subscriptionQueue = dest.getAddress().getName();
+            handleLinkCreation(ssn, dest, null, subscriptionQueue);
         }
 
-        Map<String,Object> args = null;
+        Map<String, Object> args = null;
         if (dest.getAddress().getLink().getSubscription().getArgs().size() > 0)
         {
             args = dest.getAddress().getLink().getSubscription().getArgs();
         }
-        
+
         try
         {
             ssn.getAMQPSession().messageSubscribe(subscriptionQueue, consumerId, getMessageAcceptMode(ackMode),
@@ -90,6 +94,21 @@ public class AddressResolution
         }
 
         return subscriptionQueue;
+    }
+
+    public static AMQPDestination verifyForProducer(SessionImpl ssn, DestinationImpl dest) throws JMSException
+    {
+        NodeType nodeType = AddressResolution.resolveDestination(ssn, dest, CheckMode.SENDER);
+        if (NodeType.TOPIC == nodeType)
+        {
+            handleLinkCreation(ssn, dest, dest.getAddress().getName(), null);
+            return new AMQPDestination(dest.getAddress().getName(), dest.getAddress().getSubject());
+        }
+        else
+        {
+            handleLinkCreation(ssn, dest, null, null);
+            return new AMQPDestination("", dest.getAddress().getName());
+        }
     }
 
     public static ReplyTo getReplyTo(SessionImpl ssn, DestinationImpl dest)
@@ -113,18 +132,19 @@ public class AddressResolution
                 return new ReplyTo("", dest.getAddress().getName());
             case EXCHANGE:
                 return new ReplyTo(dest.getAddress().getName(), dest.getAddress().getSubject());
-            default :
+            default:
                 // If not found, treat it as a Queue.
-                // The producer or consumer who uses this address will work that out.
-                // It could be that another entity is responsible for creating the node at a later time.
+                // The producer or consumer who uses this address will work that
+                // out.
+                // It could be that another entity is responsible for creating
+                // the node at a later time.
                 // However, If ambiguous what should we do ?
                 return new ReplyTo("", dest.getAddress().getName());
             }
         }
     }
 
-    static NodeType resolveDestination(SessionImpl ssn, DestinationImpl dest, CheckMode mode)
-            throws JMSException
+    static NodeType resolveDestination(SessionImpl ssn, DestinationImpl dest, CheckMode mode) throws JMSException
     {
         NodeQueryStatus status = verifyNodeExists(ssn, dest);
         switch (status)
@@ -299,8 +319,8 @@ public class AddressResolution
             {
                 args.put(AddressHelper.NO_LOCAL, true);
             }
-            
-            ssn.getAMQPSession().queueDeclare(name, queue.getAlternateExchange(), args.size() > 0? args : null,
+
+            ssn.getAMQPSession().queueDeclare(name, queue.getAlternateExchange(), args.size() > 0 ? args : null,
                     queue.isAutoDelete() ? Option.AUTO_DELETE : Option.NONE,
                     link.isDurable() ? Option.DURABLE : Option.NONE,
                     queue.isExclusive() ? Option.EXCLUSIVE : Option.NONE);
@@ -575,17 +595,26 @@ public class AddressResolution
         }
     }
 
-    static int evaluateCapacity(int defaultCapacity, DestinationImpl dest)
+    public static int evaluateCapacity(int defaultCapacity, DestinationImpl dest, CheckMode mode)
     {
         Link link = dest.getAddress().getLink();
-        if (link.getConsumerCapacity() > 0)
+        if (mode == CheckMode.RECEIVER && link.getConsumerCapacity() > 0)
         {
             return link.getConsumerCapacity();
+        }
+        else if (mode == CheckMode.SENDER && link.getProducerCapacity() > 0)
+        {
+            return link.getProducerCapacity();
         }
         else
         {
             return defaultCapacity;
         }
+    }
+
+    public static boolean isReplayRequired(DestinationImpl dest)
+    {
+        return dest.getAddress().getLink().getReliability() != Reliability.UNRELIABLE;
     }
 
     static boolean matchProps(Map<String, Object> target, Map<String, Object> source)

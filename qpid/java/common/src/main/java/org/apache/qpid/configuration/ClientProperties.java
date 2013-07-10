@@ -217,6 +217,9 @@ public class ClientProperties
     public static final String QPID_LIST_MESSAGE_CAPACITY = "qpid.list_msg_capacity";
     public static final int DEFAULT_LIST_MESSAGE_CAPACITY = 5;
 
+    public static final String QPID_SENDER_CAPACITY = "qpid.sender_capacity";
+    public static final int DEFAULT_SENDER_CAPACITY = 500;
+
     private ClientProperties()
     {
         //No instances

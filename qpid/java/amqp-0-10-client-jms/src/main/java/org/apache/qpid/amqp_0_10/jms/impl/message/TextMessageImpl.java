@@ -33,7 +33,7 @@ import org.apache.qpid.transport.DeliveryProperties;
 import org.apache.qpid.transport.MessageProperties;
 import org.apache.qpid.util.ExceptionHelper;
 
-public class TextMessageImpl extends MessageImpl implements TextMessage
+public class TextMessageImpl extends MessageImpl implements TextMessage, ContentTypes
 {
     private static final Charset DEFAULT_CHARSET = Charset.forName("UTF-8");
 
@@ -43,7 +43,9 @@ public class TextMessageImpl extends MessageImpl implements TextMessage
 
     private JMSException _exception;
 
-    private String _decodedValue;
+    private String _string;
+
+    private ByteBuffer _encodedBytes;
 
     TextMessageImpl()
     {
@@ -51,7 +53,7 @@ public class TextMessageImpl extends MessageImpl implements TextMessage
         try
         {
             setBooleanProperty(PAYLOAD_NULL_PROPERTY, true);
-            getMessageProperties().setContentType("text/plain");
+            getMessageProperties().setContentType(TEXT_PLAIN);
             getMessageProperties().setContentEncoding("UTF-8");
         }
         catch (JMSException e)
@@ -68,12 +70,13 @@ public class TextMessageImpl extends MessageImpl implements TextMessage
         {
             if (propertyExists(PAYLOAD_NULL_PROPERTY) || data == null || data.remaining() == 0)
             {
-                _decodedValue = null;
+                _string = null;
             }
             else
             {
                 _decoder = DEFAULT_CHARSET.newDecoder();
-                _decodedValue = _decoder.decode(data).toString();
+                _string = _decoder.decode(data).toString();
+                _encodedBytes = data;
             }
         }
         catch (CharacterCodingException e)
@@ -89,34 +92,39 @@ public class TextMessageImpl extends MessageImpl implements TextMessage
     @Override
     public ByteBuffer getContent() throws JMSException
     {
-        try
+        if (_exception != null)
         {
-            if (_exception != null)
+            throw _exception;
+        }
+        if (_encodedBytes == null)
+        {
+            if (_string == null)
             {
-                throw _exception;
-            }
-            else if (_decodedValue == null)
-            {
-                return EMPTY_BYTE_BUFFER;
+                _encodedBytes = EMPTY_BYTE_BUFFER;
             }
             else
             {
-                _encoder = DEFAULT_CHARSET.newEncoder();
-                _encoder.reset();
-                return _encoder.encode(CharBuffer.wrap(_decodedValue));
+                try
+                {
+                    _encoder = DEFAULT_CHARSET.newEncoder();
+                    _encoder.reset();
+                    _encodedBytes = _encoder.encode(CharBuffer.wrap(_string));
+                }
+                catch (CharacterCodingException e)
+                {
+                    throw ExceptionHelper.handleMessageException("Cannot encode string in UFT-8: " + _string, e);
+                }
             }
         }
-        catch (CharacterCodingException e)
-        {
-            throw ExceptionHelper.handleMessageException("Cannot encode string in UFT-8: " + _decodedValue, e);
-        }
+        return _encodedBytes;
     }
 
     @Override
     public void clearBody() throws JMSException
     {
         super.clearBody();
-        _decodedValue = null;
+        _string = null;
+        _encodedBytes = null;
         _exception = null;
     }
 
@@ -128,7 +136,7 @@ public class TextMessageImpl extends MessageImpl implements TextMessage
         {
             throw _exception;
         }
-        return _decodedValue;
+        return _string;
     }
 
     @Override
@@ -143,6 +151,6 @@ public class TextMessageImpl extends MessageImpl implements TextMessage
         {
             removeProperty(PAYLOAD_NULL_PROPERTY);
         }
-        _decodedValue = txt;
+        _string = txt;
     }
 }

@@ -57,8 +57,8 @@ import javax.jms.TopicPublisher;
 import javax.jms.TopicSession;
 import javax.jms.TopicSubscriber;
 
+import org.apache.qpid.amqp_0_10.jms.MessageFactory;
 import org.apache.qpid.client.JmsNotImplementedException;
-import org.apache.qpid.client.message.MessageFactory;
 import org.apache.qpid.transport.ConnectionException;
 import org.apache.qpid.transport.SessionException;
 import org.apache.qpid.transport.util.Logger;
@@ -68,6 +68,7 @@ import org.apache.qpid.util.MessageFactorySupport;
 public class SessionImpl implements Session, QueueSession, TopicSession
 {
     private static final Logger _logger = Logger.get(SessionImpl.class);
+
     private static final AtomicInteger _consumerTag = new AtomicInteger();
 
     private static Timer timer = new Timer("ack-flusher", true);
@@ -96,7 +97,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
                 }
                 catch (JMSException e)
                 {
-                    _logger.warn(e,"Error flushing pending acknowledgements");
+                    _logger.warn(e, "Error flushing pending acknowledgements");
                 }
             }
         }
@@ -108,18 +109,18 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private final AcknowledgeMode _ackMode;
 
-    private long _maxAckDelay = Long.getLong("qpid.session.max_ack_delay", 5*60000);
+    private long _maxAckDelay = Long.getLong("qpid.session.max_ack_delay", 5 * 60000);
 
     private TimerTask _flushTask = null;
 
     private final List<MessageProducerImpl> _producers = new ArrayList<MessageProducerImpl>(2);
 
     private final Map<String, MessageConsumerImpl> _consumers = new HashMap<String, MessageConsumerImpl>(2);
-    
+
     private final AtomicBoolean _closed = new AtomicBoolean(false);
-    
+
     private final MessageFactory _messageFactory;
-    
+
     protected SessionImpl(ConnectionImpl conn, int ackMode) throws JMSException
     {
         _conn = conn;
@@ -174,12 +175,12 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         {
             _closed.set(true);
             cancelTimerTask();
-            for (MessageProducerImpl prod: _producers)
+            for (MessageProducerImpl prod : _producers)
             {
                 prod.close();
             }
-            
-            for (MessageConsumerImpl cons: _consumers.values())
+
+            for (MessageConsumerImpl cons : _consumers.values())
             {
                 cons.close();
             }
@@ -195,12 +196,12 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         {
             _closed.set(true);
             cancelTimerTask();
-            for (MessageProducerImpl prod: _producers)
+            for (MessageProducerImpl prod : _producers)
             {
                 prod.closed();
             }
-            
-            for (MessageConsumerImpl cons: _consumers.values())
+
+            for (MessageConsumerImpl cons : _consumers.values())
             {
                 cons.closed();
             }
@@ -214,11 +215,11 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         checkClosed();
         checkTransactional();
 
-        for (MessageConsumerImpl cons: _consumers.values())
+        for (MessageConsumerImpl cons : _consumers.values())
         {
             cons.commit();
         }
-        
+
         try
         {
             _amqpSession.setAutoSync(true);
@@ -238,11 +239,11 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         checkClosed();
         checkTransactional();
 
-        for (MessageConsumerImpl cons: _consumers.values())
+        for (MessageConsumerImpl cons : _consumers.values())
         {
             cons.rollback();
         }
-        
+
         try
         {
             _amqpSession.setAutoSync(true);
@@ -276,42 +277,46 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     }
 
     @Override
-    public MessageProducer createProducer(Destination arg0) throws JMSException
+    public MessageProducer createProducer(Destination dest) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        MessageProducerImpl prod = new MessageProducerImpl(this, dest);
+        _producers.add(prod);
+        return prod;
     }
-    
+
     @Override
-    public MessageConsumer createConsumer(Destination arg0) throws JMSException
+    public MessageConsumer createConsumer(Destination dest) throws JMSException
+    {
+        return createConsumer(dest, null);
+    }
+
+    @Override
+    public MessageConsumer createConsumer(Destination dest, String selector) throws JMSException
+    {
+        return createConsumer(dest, selector, false);
+    }
+
+    @Override
+    public MessageConsumer createConsumer(Destination dest, String selector, boolean noLocal) throws JMSException
+    {
+        String tag = String.valueOf(_consumerTag.incrementAndGet());
+
+        MessageConsumerImpl cons = new MessageConsumerImpl(tag, this, dest, selector, noLocal, false, _ackMode);
+
+        _consumers.put(tag, cons);
+
+        return cons;
+    }
+
+    @Override
+    public TopicSubscriber createDurableSubscriber(Topic topic, String name) throws JMSException
     {
         // TODO Auto-generated method stub
         return null;
     }
 
     @Override
-    public MessageConsumer createConsumer(Destination arg0, String arg1) throws JMSException
-    {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public MessageConsumer createConsumer(Destination arg0, String arg1, boolean arg2) throws JMSException
-    {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public TopicSubscriber createDurableSubscriber(Topic arg0, String arg1) throws JMSException
-    {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public TopicSubscriber createDurableSubscriber(Topic arg0, String arg1, String arg2, boolean arg3)
+    public TopicSubscriber createDurableSubscriber(Topic topic, String name, String selector, boolean noLocal)
             throws JMSException
     {
         // TODO Auto-generated method stub
@@ -324,7 +329,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         // TODO Auto-generated method stub
 
     }
-    
+
     @Override
     public QueueBrowser createBrowser(Queue queue) throws JMSException
     {
@@ -384,65 +389,59 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public Message createMessage() throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return _messageFactory.createMessage();
     }
 
     @Override
     public BytesMessage createBytesMessage() throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return _messageFactory.createBytesMessage();
     }
 
     @Override
     public TextMessage createTextMessage() throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return _messageFactory.createTextMessage();
     }
 
-
     @Override
-    public TextMessage createTextMessage(String arg0) throws JMSException
+    public TextMessage createTextMessage(String txt) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        TextMessage msg = createTextMessage();
+        msg.setText(txt);
+        return msg;
     }
 
     @Override
     public MapMessage createMapMessage() throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return _messageFactory.createMapMessage();
     }
 
     @Override
     public ObjectMessage createObjectMessage() throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return _messageFactory.createObjectMessage();
     }
 
     @Override
-    public ObjectMessage createObjectMessage(Serializable arg0) throws JMSException
+    public ObjectMessage createObjectMessage(Serializable serilizable) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        ObjectMessage msg = createObjectMessage();
+        msg.setObject(serilizable);
+        return msg;
     }
 
     @Override
     public StreamMessage createStreamMessage() throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return _messageFactory.createStreamMessage();
     }
 
     @Override
-    public Queue createQueue(String arg0) throws JMSException
+    public Queue createQueue(String queue) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return new QueueImpl(queue);
     }
 
     @Override
@@ -460,10 +459,9 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     }
 
     @Override
-    public Topic createTopic(String arg0) throws JMSException
+    public Topic createTopic(String topic) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return new TopicImpl(topic);
     }
 
     @Override
@@ -487,10 +485,10 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     {
         return null;
     }
-    
+
     void checkClosed() throws JMSException
     {
-        if(_closed.get())
+        if (_closed.get())
         {
             throw new IllegalStateException("Session is closed");
         }
@@ -505,15 +503,15 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     {
         _consumers.remove(cons);
     }
-    
+
     protected org.apache.qpid.transport.Session getAMQPSession()
     {
         return _amqpSession;
     }
-    
+
     private void flushPendingAcknowledgements() throws JMSException
     {
-        for(MessageConsumerImpl consumer : _consumers.values())
+        for (MessageConsumerImpl consumer : _consumers.values())
         {
             consumer.sendMessageAccept(true);
         }
@@ -521,7 +519,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private void checkTransactional() throws JMSException
     {
-        if(!getTransacted())
+        if (!getTransacted())
         {
             throw new IllegalStateException("Session must be transacted in order to perform this operation");
         }
@@ -529,7 +527,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private void checkNotTransactional() throws JMSException
     {
-        if(getTransacted())
+        if (getTransacted())
         {
             throw new IllegalStateException("This operation is not permitted on a transacted session");
         }
@@ -543,14 +541,14 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             _flushTask = null;
         }
     }
-    
-    //--------------- Unsupported Methods -------------
+
+    // --------------- Unsupported Methods -------------
     @Override
     public void run()
     {
         throw new java.lang.UnsupportedOperationException("This operation is not supported");
     }
-    
+
     @Override
     public MessageListener getMessageListener() throws JMSException
     {
@@ -567,7 +565,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     void acknowledgeMesages()
     {
-        
+
     }
 
 }

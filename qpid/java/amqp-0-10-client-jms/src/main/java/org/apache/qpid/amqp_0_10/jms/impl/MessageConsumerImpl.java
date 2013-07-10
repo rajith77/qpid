@@ -36,6 +36,7 @@ import javax.jms.JMSException;
 import javax.jms.MessageConsumer;
 import javax.jms.MessageListener;
 
+import org.apache.qpid.amqp_0_10.jms.impl.AddressResolution.CheckMode;
 import org.apache.qpid.transport.MessageCreditUnit;
 import org.apache.qpid.transport.MessageFlowMode;
 import org.apache.qpid.transport.Option;
@@ -99,8 +100,8 @@ public class MessageConsumerImpl implements MessageConsumer
         _selector = selector;
         _noLocal = noLocal;
         _consumerTag = consumerTag;
-        _capacity = AddressResolution.evaluateCapacity(0, _dest);
-        // TODO get mx prefetch from connnection
+        _capacity = AddressResolution.evaluateCapacity(_session.getConnection().getConfig().getMaxPrefetch(), _dest,
+                CheckMode.RECEIVER);
         _localQueue = new LinkedBlockingQueue<MessageImpl>(_capacity);
 
         switch (ackMode)
@@ -128,6 +129,7 @@ public class MessageConsumerImpl implements MessageConsumer
         {
             throw ExceptionHelper.toJMSException("Error creating consumer.", se);
         }
+        _logger.debug("Sucessfully created message consumer for : " + dest);
     }
 
     @Override
@@ -142,6 +144,17 @@ public class MessageConsumerImpl implements MessageConsumer
     {
         checkClosed();
         return _selector;
+    }
+
+    public boolean getNoLocal() throws JMSException
+    {
+        checkClosed();
+        return _noLocal;
+    }
+
+    protected DestinationImpl getDestination()
+    {
+        return _dest;
     }
 
     @Override
