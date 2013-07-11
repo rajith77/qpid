@@ -84,8 +84,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     private final Condition _failoverComplete = _conditionLock.newCondition();
 
-    private final Condition _started = _conditionLock.newCondition();
-
     private org.apache.qpid.transport.Connection _amqpConnection;
 
     private final List<SessionImpl> _sessions = new ArrayList<SessionImpl>();
@@ -162,8 +160,9 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 stop();
                 for (SessionImpl session : _sessions)
                 {
-                    session.close();
+                    session.closeImpl(true, false);
                 }
+                _sessions.clear();
 
                 if (_amqpConnection != null && _state != State.UNCONNECTED)
                 {
@@ -200,14 +199,17 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     private SessionImpl createSession(int ackMode) throws JMSException
     {
         checkClosed();
-        if (_state == State.UNCONNECTED)
+        synchronized (_lock)
         {
-            ConnectionSettings conSettings = retrieveConnectionSettings(_url.getBrokerDetails(0));
-            connect(conSettings);
+            if (_state == State.UNCONNECTED)
+            {
+                ConnectionSettings conSettings = retrieveConnectionSettings(_url.getBrokerDetails(0));
+                connect(conSettings);
+            }
+            SessionImpl ssn = new SessionImpl(this, ackMode);
+            _sessions.add(ssn);
+            return ssn;
         }
-        SessionImpl ssn = new SessionImpl(this, ackMode);
-        _sessions.add(ssn);
-        return ssn;
     }
 
     @Override
@@ -318,15 +320,69 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     {
         // TODO Auto-generated method stub
     }
-
-    protected org.apache.qpid.transport.Connection getAMQPConnection()
+    // -----------------------------------------
+    
+    org.apache.qpid.transport.Connection getAMQPConnection()
     {
         return _amqpConnection;
     }
 
-    protected void removeSession(SessionImpl ssn)
+    void removeSession(SessionImpl ssn)
     {
-        _sessions.remove(ssn);
+        synchronized (_lock)
+        {
+            _sessions.remove(ssn);
+        }
+    }
+
+    boolean isStarted()
+    {
+        return _state == State.STARTED;
+    }
+
+    boolean isFailoverInProgress()
+    {
+        return _failoverInProgress.get();
+    }
+    
+    /**
+     * @param timeout : If timeout == 0, then wait until true.
+     * @return
+     */
+    long waitForFailoverToComplete(long timeout) throws InterruptedException
+    {
+        if (_failoverInProgress.get())
+        {
+            _conditionLock.lock();
+            try
+            {
+                synchronized (_failoverInProgress)
+                {
+                    if (_failoverInProgress.get())
+                    {
+                        long remaining = _failoverComplete.awaitNanos(TimeUnit.MILLISECONDS.toNanos(timeout));
+                        return TimeUnit.NANOSECONDS.toMillis(remaining);
+                    }
+                    else
+                    {
+                        return timeout;
+                    }
+                }
+            }
+            finally
+            {
+                _conditionLock.unlock();
+            }
+        }
+        else
+        {
+            return timeout;
+        }
+    }
+
+    ConnectionConfig getConfig()
+    {
+        return _config;
     }
 
     // ----------------------------------------
@@ -366,45 +422,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     }
 
     // --------------------------------------
-    boolean isStarted()
-    {
-        return _state == State.STARTED;
-    }
-
-    boolean isFailoverInProgress()
-    {
-        return _failoverInProgress.get();
-    }
-
-    long waitForFailoverToComplete(long timeout) throws InterruptedException
-    {
-        _conditionLock.lock();
-        try
-        {
-            synchronized (_failoverInProgress)
-            {
-                if (_failoverInProgress.get())
-                {
-                    long remaining = _failoverComplete.awaitNanos(TimeUnit.MILLISECONDS.toNanos(timeout));
-                    return TimeUnit.NANOSECONDS.toMillis(remaining);
-                }
-                else
-                {
-                    return timeout;
-                }
-            }
-        }
-        finally
-        {
-            _conditionLock.unlock();
-        }
-    }
-
-    ConnectionConfig getConfig()
-    {
-        return _config;
-    }
-
+    
     private ConnectionSettings retrieveConnectionSettings(BrokerDetails brokerDetail)
     {
         ConnectionSettings conSettings = brokerDetail.buildConnectionSettings();

@@ -22,13 +22,13 @@ package org.apache.qpid.amqp_0_10.jms.impl;
 
 import java.io.Serializable;
 import java.lang.ref.WeakReference;
-import java.util.ArrayList;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -57,6 +57,7 @@ import javax.jms.Topic;
 import javax.jms.TopicPublisher;
 import javax.jms.TopicSession;
 import javax.jms.TopicSubscriber;
+import javax.jms.TransactionRolledBackException;
 
 import org.apache.qpid.amqp_0_10.jms.MessageFactory;
 import org.apache.qpid.client.JmsNotImplementedException;
@@ -115,11 +116,13 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     private final long _maxAckDelay = Long.getLong(ClientProperties.QPID_SESSION_MAX_ACK_DELAY,
             ClientProperties.DEFAULT_SESSION_MAX_ACK_DELAY);
 
-    private final List<MessageProducerImpl> _producers = new ArrayList<MessageProducerImpl>(2);
+    private final List<MessageProducerImpl> _producers = new CopyOnWriteArrayList<MessageProducerImpl>();
 
-    private final Map<String, MessageConsumerImpl> _consumers = new HashMap<String, MessageConsumerImpl>(2);
+    private final Map<String, MessageConsumerImpl> _consumers = new ConcurrentHashMap<String, MessageConsumerImpl>(2);
 
     private final AtomicBoolean _closed = new AtomicBoolean(false);
+
+    private final AtomicBoolean _failedOverDirty = new AtomicBoolean(false);
 
     private final MessageFactory _messageFactory;
 
@@ -142,7 +145,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         // Message factory could be a connection property if need be.
         _messageFactory = MessageFactorySupport.getMessageFactory(null);
 
-        _replayQueue = new HashMap<Integer, MessageTransfer>(Integer.getInteger(
+        _replayQueue = new ConcurrentHashMap<Integer, MessageTransfer>(Integer.getInteger(
                 ClientProperties.QPID_SESSION_REPLAY_QUEUE_CAPACITY,
                 ClientProperties.DEFAULT_SESSION_REPLAY_QUEUE_CAPACITY));
     }
@@ -177,26 +180,15 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public void close() throws JMSException
     {
-        if (!_closed.get())
-        {
-            _closed.set(true);
-            cancelTimerTask();
-            for (MessageProducerImpl prod : _producers)
-            {
-                prod.close();
-            }
-
-            for (MessageConsumerImpl cons : _consumers.values())
-            {
-                cons.close();
-            }
-            getAMQPSession().close();
-            _conn.removeSession(this);
-        }
+        closeImpl(true, true);
     }
 
-    // Called when the peer closes the session
-    protected void closed()
+    
+    /**
+     * @param sendClose  : Whether to send protocol close.
+     * @param unregister : Whether to unregister from the connection.
+     */
+    void closeImpl(boolean sendClose, boolean unregister) throws JMSException
     {
         if (!_closed.get())
         {
@@ -204,14 +196,26 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             cancelTimerTask();
             for (MessageProducerImpl prod : _producers)
             {
-                prod.closed();
+                prod.closeImpl(sendClose, false);
             }
-
+            _consumers.clear();
+            
             for (MessageConsumerImpl cons : _consumers.values())
             {
-                cons.closed();
+                cons.closeImpl(sendClose, false);
+            }            
+            _producers.clear();
+            
+            if (sendClose)
+            {
+                getAMQPSession().close();
+                getAMQPSession().sync();
             }
-            _conn.removeSession(this);
+            
+            if (unregister)
+            {
+                _conn.removeSession(this);
+            }
         }
     }
 
@@ -221,6 +225,14 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         checkClosed();
         checkTransactional();
 
+        if (_failedOverDirty.get())
+        {
+            rollback();
+
+            throw new TransactionRolledBackException("Connection failover has occured with uncommitted transaction activity." +
+                                                     "The transaction was rolled back.");
+        }
+        
         for (MessageConsumerImpl cons : _consumers.values())
         {
             cons.sendMessageAccept(false);
@@ -234,7 +246,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
         catch (SessionException se)
         {
-            closed();
+            closeImpl(false,false);
             throw ExceptionHelper.toJMSException("Commit failed due to error", se);
         }
     }
@@ -258,8 +270,13 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
         catch (SessionException se)
         {
-            closed();
+            closeImpl(false,false);
             throw ExceptionHelper.toJMSException("Rollback failed due to error", se);
+        }
+
+        if (_failedOverDirty.get())
+        {
+            _failedOverDirty.set(false);
         }
 
         for (MessageConsumerImpl cons : _consumers.values())
@@ -267,6 +284,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             cons.requeueUnackedMessages();
             cons.startMessageDelivery();
         }
+
     }
 
     @Override
@@ -313,7 +331,38 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         // TODO is there a requirement to drain the queues and release messages
         // in internal queues ?
     }
+
+    void preFailover() throws JMSException
+    {
+        if (_ackMode == AcknowledgeMode.TRANSACTED)
+        {
+            _failedOverDirty.set(true);
+        }
+
+        for (MessageProducerImpl prod: _producers)
+        {
+            prod.stopMessageSender();
+        }
+        for (MessageConsumerImpl cons: _consumers.values())
+        {
+            cons.stopMessageDelivery();
+        }
+    }
     
+    void postFailover() throws JMSException
+    {
+        for (MessageConsumerImpl cons: _consumers.values())
+        {
+            cons.createSubscription();
+            cons.startMessageDelivery();
+        }
+        for (MessageProducerImpl prod: _producers)
+        {
+            prod.verifyDestinationForProducer();
+            prod.startMessageSender();
+        }
+    }
+
     @Override
     public MessageProducer createProducer(Destination dest) throws JMSException
     {

@@ -94,6 +94,8 @@ public class MessageProducerImpl implements MessageProducer
 
     private final ConditionManager _msgSendingInProgress = new ConditionManager(false);
 
+    private final ConditionManager _msgSenderStopped = new ConditionManager(false);
+    
     private boolean _syncPublish = false;
 
     private MessageDeliveryMode _deliveryMode = MessageDeliveryMode.get((short) Message.DEFAULT_DELIVERY_MODE);
@@ -122,7 +124,7 @@ public class MessageProducerImpl implements MessageProducer
 
         _userIDBytes = Strings.toUTF8(ssn.getConnection().getAMQPConnection().getUserID());
 
-        _amqpDest = AddressResolution.verifyForProducer(ssn, _dest);
+        _amqpDest = verifyDestinationForProducer();
 
         _syncPublish = getSyncPublish();
 
@@ -135,6 +137,14 @@ public class MessageProducerImpl implements MessageProducer
         _logger.debug("Sucessfully created message producer for : " + dest);
     }
 
+    /*
+     * Verifies the address and creates if specified.
+     */
+    AMQPDestination verifyDestinationForProducer() throws JMSException
+    {
+        return AddressResolution.verifyForProducer(_session, _dest);
+    }
+    
     @Override
     public void close() throws JMSException
     {
@@ -146,11 +156,25 @@ public class MessageProducerImpl implements MessageProducer
         }
     }
 
-    public void closed()
+    /**
+     * @param sendClose  : Whether to send protocol close.
+     * @param unregister : Whether to unregister from the session.
+     */
+    void closeImpl(boolean sendClose, boolean unregister) throws JMSException
     {
         if (!_closed.get())
         {
             _closed.set(true);
+            
+            if (unregister)
+            {
+                _session.removeProducer(this);
+            }
+            
+            if (sendClose)
+            {
+                AddressResolution.cleanupForProducer(_session, _dest);
+            }
         }
     }
 
@@ -244,11 +268,7 @@ public class MessageProducerImpl implements MessageProducer
 
         try
         {
-            if (_session.getConnection().isFailoverInProgress())
-            {
-                _session.getConnection().waitForFailoverToComplete(0);
-            }
-
+            _msgSenderStopped.waitUntilFalse();
             _msgSendingInProgress.setValueAndNotify(true);
 
             ByteBuffer buffer = data == null ? ByteBuffer.allocate(0) : data.slice();
@@ -361,6 +381,17 @@ public class MessageProducerImpl implements MessageProducer
     {
         checkClosed();
         _ttl = ttl;
+    }
+
+    void stopMessageSender()
+    {
+        _msgSendingInProgress.waitUntilFalse();
+        _msgSenderStopped.setValueAndNotify(true);
+    }
+
+    void startMessageSender()
+    {
+        _msgSenderStopped.setValueAndNotify(false);
     }
 
     void setReplyTo(MessageImpl m) throws JMSException

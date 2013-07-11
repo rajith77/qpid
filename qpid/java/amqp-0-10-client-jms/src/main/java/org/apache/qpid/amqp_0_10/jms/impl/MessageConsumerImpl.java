@@ -176,6 +176,15 @@ public class MessageConsumerImpl implements MessageConsumer
     @Override
     public void close() throws JMSException
     {
+        closeImpl(true, true);
+    }
+    
+    /**
+     * @param sendClose  : Whether to send protocol close.
+     * @param unregister : Whether to unregister from the session.
+     */
+    void closeImpl(boolean sendClose, boolean unregister) throws JMSException
+    {    
         if (Thread.currentThread() == _session.getDispatcherThread() && _msgDeliveryInProgress.getCurrentValue())
         {
             _closeFromOnMessage.set(true);
@@ -185,7 +194,11 @@ public class MessageConsumerImpl implements MessageConsumer
         if (!_closed.get())
         {
             _closed.set(true);
-            _session.removeConsumer(this);
+            if(unregister)
+            {
+                _session.removeConsumer(this);
+            }
+
             if (_msgDeliveryStopped.getCurrentValue())
             {
                 // wake up anything waiting on _msgDeliveryStopped and return.
@@ -194,9 +207,12 @@ public class MessageConsumerImpl implements MessageConsumer
             {
                 waitForInProgressDeliveriesToStop();
             }
-            cancelSubscription();
-            releaseMessages();
-            AddressResolution.cleanupForConsumer(_session, _dest, _subscriptionQueue);
+            if (sendClose)
+            {
+                cancelSubscription();
+                releaseMessages();
+                AddressResolution.cleanupForConsumer(_session, _dest, _subscriptionQueue);
+            }
         }
     }
 
@@ -418,15 +434,6 @@ public class MessageConsumerImpl implements MessageConsumer
             _localQueue.add(m);
         }
         _localQueue.addAll(tmp);
-    }
-
-    // Due to a session or connection exception.
-    void closed()
-    {
-        if (!_closed.get())
-        {
-            _closed.set(true);
-        }
     }
 
     void releaseMessages() throws JMSException
