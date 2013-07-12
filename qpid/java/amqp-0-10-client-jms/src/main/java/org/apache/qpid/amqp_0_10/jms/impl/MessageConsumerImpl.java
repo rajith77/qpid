@@ -324,16 +324,13 @@ public class MessageConsumerImpl implements MessageConsumer
     }
 
     void messageReceived(MessageImpl m)
-    {
+    {        
+        releaseMessageIfClosed(m);
+        _msgDeliveryStopped.waitUntilFalse();        
+        _msgDeliveryInProgress.setValueAndNotify(true);
         releaseMessageIfClosed(m);
         try
         {
-            _msgDeliveryStopped.waitUntilFalse();
-            // A Check point for already stopped consumer.
-            releaseMessageIfClosed(m);
-
-            _msgDeliveryInProgress.setValueAndNotify(true);
-
             if (_msgListener != null)
             {
                 _msgListener.onMessage(m);
