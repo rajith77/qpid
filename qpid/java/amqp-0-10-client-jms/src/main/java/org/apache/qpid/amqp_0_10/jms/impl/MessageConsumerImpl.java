@@ -45,6 +45,7 @@ import org.apache.qpid.transport.RangeSet;
 import org.apache.qpid.transport.RangeSetFactory;
 import org.apache.qpid.transport.util.Logger;
 import org.apache.qpid.util.ConditionManager;
+import org.apache.qpid.util.ConditionManagerTimeoutException;
 import org.apache.qpid.util.ExceptionHelper;
 
 public class MessageConsumerImpl implements MessageConsumer
@@ -242,42 +243,44 @@ public class MessageConsumerImpl implements MessageConsumer
     @Override
     public MessageImpl receive() throws JMSException
     {
+        preSyncReceiveCheck();
+        _msgDeliveryStopped.waitUntilFalse();
         return receiveImpl(0);
     }
 
     @Override
     public MessageImpl receive(long timeout) throws JMSException
     {
-        return receiveImpl(timeout);
+        preSyncReceiveCheck();
+        long remaining = timeout;
+        try
+        {
+            remaining = _msgDeliveryStopped.waitUntilFalse(remaining);
+        }
+        catch (ConditionManagerTimeoutException e)
+        {
+            // Time out, return null.
+            return null;
+        }
+        return receiveImpl(remaining);
     }
 
     @Override
     public MessageImpl receiveNoWait() throws JMSException
     {
+        preSyncReceiveCheck();
+        if (_msgDeliveryStopped.getCurrentValue())
+        {
+            return null;
+        }
         return receiveImpl(-1L);
     }
 
     MessageImpl receiveImpl(long timeout) throws JMSException
     {
-        checkClosed();
-        if (_msgListener != null)
-        {
-            throw new IllegalStateException("A listener has already been set.");
-        }
-
-        long remaining = timeout;
-        if (_msgDeliveryStopped.getCurrentValue())
-        {
-            remaining = _msgDeliveryStopped.waitUntilFalse(remaining);
-            // Time out waiting for message delivery to start.
-            if (remaining < 0)
-            {
-                return null;
-            }
-        }
-
-        _syncReceiveThread = Thread.currentThread();
         _msgDeliveryInProgress.setValueAndNotify(true);
+        checkClosed();
+        _syncReceiveThread = Thread.currentThread();
         MessageImpl m = null;
         try
         {
@@ -285,13 +288,13 @@ public class MessageConsumerImpl implements MessageConsumer
             {
                 setMessageCredit(1);
                 sendMessageFlush();
-                sync(remaining);
+                sync(timeout);
             }
             try
             {
                 if (timeout > 0)
                 {
-                    m = _localQueue.poll(remaining, TimeUnit.MILLISECONDS);
+                    m = _localQueue.poll(timeout, TimeUnit.MILLISECONDS);
                 }
                 else if (timeout < 0)
                 {
@@ -663,6 +666,15 @@ public class MessageConsumerImpl implements MessageConsumer
                 _logger.warn(e, "Error trying to release message for closed consumer");
             }
             return;
+        }
+    }
+
+    private void preSyncReceiveCheck() throws JMSException
+    {
+        checkClosed();
+        if (_msgListener != null)
+        {
+            throw new IllegalStateException("A listener has already been set.");
         }
     }
 
