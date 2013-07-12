@@ -178,13 +178,36 @@ public class MessageConsumerImpl implements MessageConsumer
     {
         closeImpl(true, true);
     }
-    
+
     /**
-     * @param sendClose  : Whether to send protocol close.
-     * @param unregister : Whether to unregister from the session.
+     * The following are the steps involved.
+     * 
+     * 1. Consumer is removed from the session to prevent further delivery. Due
+     * to the way ConcurrentHashMap works, the removal may not be immediately
+     * visible. Therefore messageReceive will check for close and release any
+     * messages given to it, after it was closed.
+     * 
+     * 2. Message delivery from this consumer is marked as stopped. [A consumer
+     * may already be in a stopped state (Ex due to connection.stop) before the
+     * close was called, and the dispatcher thread maybe waiting on the stopped
+     * condition. The thread is woken up. The subsequent check for close will
+     * release the message and return.]
+     * 
+     * 3. The closing thread will then await completion, if message delivery is
+     * in progress.
+     * 
+     * 4. If sendClose == true, protocol commands will be issued to cancel the
+     * subscription, release messages in it's local queue and replay buffer
+     * (unacked) and delete bindings and nodes as specified in the address. We
+     * await the completion of these commands.
+     * 
+     * @param sendClose
+     *            : Whether to send protocol close.
+     * @param unregister
+     *            : Whether to unregister from the session.
      */
     void closeImpl(boolean sendClose, boolean unregister) throws JMSException
-    {    
+    {
         if (Thread.currentThread() == _session.getDispatcherThread() && _msgDeliveryInProgress.getCurrentValue())
         {
             _closeFromOnMessage.set(true);
@@ -194,24 +217,24 @@ public class MessageConsumerImpl implements MessageConsumer
         if (!_closed.get())
         {
             _closed.set(true);
-            if(unregister)
+
+            if (unregister)
             {
                 _session.removeConsumer(this);
             }
 
-            if (_msgDeliveryStopped.getCurrentValue())
-            {
-                // wake up anything waiting on _msgDeliveryStopped and return.
-            }
-            else
-            {
-                waitForInProgressDeliveriesToStop();
-            }
+            stopMessageDelivery();
+
+            _msgDeliveryStopped.wakeUpAndReturn();
+
+            waitForInProgressDeliveriesToStop();
+
             if (sendClose)
             {
                 cancelSubscription();
                 releaseMessages();
                 AddressResolution.cleanupForConsumer(_session, _dest, _subscriptionQueue);
+                _session.getAMQPSession().sync();
             }
         }
     }
@@ -245,7 +268,7 @@ public class MessageConsumerImpl implements MessageConsumer
         long remaining = timeout;
         if (_msgDeliveryStopped.getCurrentValue())
         {
-            remaining =_msgDeliveryStopped.waitUntilFalse(remaining);
+            remaining = _msgDeliveryStopped.waitUntilFalse(remaining);
             // Time out waiting for message delivery to start.
             if (remaining < 0)
             {
@@ -299,22 +322,15 @@ public class MessageConsumerImpl implements MessageConsumer
 
     void messageReceived(MessageImpl m)
     {
-        if (_closed.get())
-        {
-            try
-            {
-                releaseMessage(m);
-            }
-            catch (JMSException e)
-            {
-                _logger.warn(e, "Error trying to release message for closed consumer");
-            }
-        }
-
+        releaseMessageIfClosed(m);
         try
         {
-            _msgDeliveryInProgress.setValueAndNotify(true);
             _msgDeliveryStopped.waitUntilFalse();
+            // A Check point for already stopped consumer.
+            releaseMessageIfClosed(m);
+
+            _msgDeliveryInProgress.setValueAndNotify(true);
+
             if (_msgListener != null)
             {
                 _msgListener.onMessage(m);
@@ -417,9 +433,9 @@ public class MessageConsumerImpl implements MessageConsumer
      * it's local queue) via it's MessageListener or the receive methods.
      */
     void stopMessageDelivery()
-    {        
-        waitForInProgressDeliveriesToStop();
+    {
         _msgDeliveryStopped.setValueAndNotify(true);
+        waitForInProgressDeliveriesToStop();
     }
 
     void requeueUnackedMessages() throws JMSException
@@ -447,6 +463,7 @@ public class MessageConsumerImpl implements MessageConsumer
             }
             _session.getAMQPSession().messageRelease(unacked, Option.REDELIVERED);
             _replayQueue.clear();
+
             RangeSet prefetched = RangeSetFactory.createRangeSet();
             for (MessageImpl m : _localQueue)
             {
@@ -620,6 +637,7 @@ public class MessageConsumerImpl implements MessageConsumer
         }
     }
 
+    // TODO Move this and all other syncs to the session.
     private void sync(long timeout) throws JMSException
     {
         try
@@ -629,6 +647,22 @@ public class MessageConsumerImpl implements MessageConsumer
         catch (Exception e)
         {
             throw ExceptionHelper.toJMSException("Error waiting for command completion", e);
+        }
+    }
+
+    private void releaseMessageIfClosed(MessageImpl m)
+    {
+        if (_closed.get() || _session.isClosed())
+        {
+            try
+            {
+                releaseMessage(m);
+            }
+            catch (JMSException e)
+            {
+                _logger.warn(e, "Error trying to release message for closed consumer");
+            }
+            return;
         }
     }
 
