@@ -95,7 +95,7 @@ public class MessageProducerImpl implements MessageProducer
     private final ConditionManager _msgSendingInProgress = new ConditionManager(false);
 
     private final ConditionManager _msgSenderStopped = new ConditionManager(false);
-    
+
     private boolean _syncPublish = false;
 
     private MessageDeliveryMode _deliveryMode = MessageDeliveryMode.get((short) Message.DEFAULT_DELIVERY_MODE);
@@ -144,36 +144,40 @@ public class MessageProducerImpl implements MessageProducer
     {
         return AddressResolution.verifyForProducer(_session, _dest);
     }
-    
+
     @Override
     public void close() throws JMSException
     {
-        if (!_closed.get())
-        {
-            _closed.set(true);
-            _session.removeProducer(this);
-            AddressResolution.cleanupForProducer(_session, _dest);
-        }
+        closeImpl(true, true);
     }
 
     /**
-     * @param sendClose  : Whether to send protocol close.
-     * @param unregister : Whether to unregister from the session.
+     * @param sendClose
+     *            : Whether to send protocol close.
+     * @param unregister
+     *            : Whether to unregister from the session.
      */
     void closeImpl(boolean sendClose, boolean unregister) throws JMSException
     {
         if (!_closed.get())
         {
             _closed.set(true);
-            
-            if (unregister)
-            {
-                _session.removeProducer(this);
-            }
-            
+            stopMessageSender();
+            // TODO now wake up if a thread is blocked on the stopped condition.
+            // If a thread was waiting on it, then an exception will be thrown to the application.
+            // _msgSenderStopped.interruptWaitingThread();
+
+            // If it has passed that point, then we wait until sending is complete.
+            _msgSendingInProgress.waitUntilFalse();
+
             if (sendClose)
             {
                 AddressResolution.cleanupForProducer(_session, _dest);
+            }
+
+            if (unregister)
+            {
+                _session.removeProducer(this);
             }
         }
     }
@@ -213,7 +217,6 @@ public class MessageProducerImpl implements MessageProducer
     void sendImpl(AMQPDestination dest, Message msg, MessageDeliveryMode deliveryMode,
             MessageDeliveryPriority priority, long timeToLive, boolean sync) throws JMSException
     {
-        checkClosed();
         MessageImpl message;
         boolean isForeignMsg = false;
         if (msg instanceof MessageImpl)
@@ -269,6 +272,8 @@ public class MessageProducerImpl implements MessageProducer
         try
         {
             _msgSenderStopped.waitUntilFalse();
+            // Check right before we send.
+            checkClosed();
             _msgSendingInProgress.setValueAndNotify(true);
 
             ByteBuffer buffer = data == null ? ByteBuffer.allocate(0) : data.slice();
@@ -385,8 +390,8 @@ public class MessageProducerImpl implements MessageProducer
 
     void stopMessageSender()
     {
-        _msgSendingInProgress.waitUntilFalse();
         _msgSenderStopped.setValueAndNotify(true);
+        _msgSendingInProgress.waitUntilFalse();
     }
 
     void startMessageSender()
