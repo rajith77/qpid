@@ -278,12 +278,13 @@ public class MessageConsumerImpl implements MessageConsumer
 
     MessageImpl receiveImpl(long timeout) throws JMSException
     {
-        _msgDeliveryInProgress.setValueAndNotify(true);
-        checkClosed();
-        _syncReceiveThread = Thread.currentThread();
         MessageImpl m = null;
         try
         {
+            _msgDeliveryInProgress.setValueAndNotify(true);
+            checkClosed();
+            _syncReceiveThread = Thread.currentThread();
+            
             if (_localQueue.isEmpty() && isPrefetchDisabled())
             {
                 setMessageCredit(1);
@@ -661,6 +662,10 @@ public class MessageConsumerImpl implements MessageConsumer
             catch (JMSException e)
             {
                 _logger.warn(e, "Error trying to release message for closed consumer");
+            }
+            finally
+            {
+                _msgDeliveryInProgress.setValueAndNotify(false);
             }
             return;
         }
