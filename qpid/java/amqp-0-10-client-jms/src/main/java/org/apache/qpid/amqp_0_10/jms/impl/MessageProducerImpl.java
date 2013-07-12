@@ -152,6 +152,15 @@ public class MessageProducerImpl implements MessageProducer
     }
 
     /**
+     * The Sender is marked close.
+     * 
+     * The sender is marked stopped. If it was already stopped (Ex. due to
+     * failover) and a thread waiting on it, will be woken up and an exception
+     * thrown to the application.
+     * 
+     * The closing thread will await completion, if any send operation is in
+     * progress.
+     * 
      * @param sendClose
      *            : Whether to send protocol close.
      * @param unregister
@@ -163,11 +172,9 @@ public class MessageProducerImpl implements MessageProducer
         {
             _closed.set(true);
             stopMessageSender();
-            // TODO now wake up if a thread is blocked on the stopped condition.
-            // If a thread was waiting on it, then an exception will be thrown to the application.
-            // _msgSenderStopped.interruptWaitingThread();
 
-            // If it has passed that point, then we wait until sending is complete.
+            _msgSenderStopped.wakeUpAndReturn();
+
             _msgSendingInProgress.waitUntilFalse();
 
             if (sendClose)
