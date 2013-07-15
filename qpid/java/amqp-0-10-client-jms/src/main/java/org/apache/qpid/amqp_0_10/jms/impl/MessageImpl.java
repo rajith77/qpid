@@ -104,6 +104,8 @@ public abstract class MessageImpl implements AmqpMessage
 
     private final int _transferId;
 
+    private final String _consumerId;
+    
     private String _messageID = null;
 
     private Mode _propertyReadWriteMode;
@@ -123,15 +125,17 @@ public abstract class MessageImpl implements AmqpMessage
         _propertyReadWriteMode = Mode.WRITABLE;
         _contentReadWriteMode = Mode.WRITABLE;
         _transferId = -1;
+        _consumerId = null;
     }
 
-    protected MessageImpl(SessionImpl ssn, int transferId, DeliveryProperties deliveryProps, MessageProperties msgProps)
+    protected MessageImpl(SessionImpl ssn, int transferId, String consumerId, DeliveryProperties deliveryProps, MessageProperties msgProps)
     {
         _deliveryProps = deliveryProps;
         _messageProps = msgProps;
         _propertyReadWriteMode = Mode.READABLE;
         _contentReadWriteMode = Mode.READABLE;
         _transferId = transferId;
+        _consumerId = consumerId;
     }
 
     @Override
@@ -976,5 +980,11 @@ public abstract class MessageImpl implements AmqpMessage
     public int getTransferId()
     {
         return _transferId;
+    }
+    
+    @Override
+    public String getConsumerId()
+    {
+        return _consumerId;
     }
 }

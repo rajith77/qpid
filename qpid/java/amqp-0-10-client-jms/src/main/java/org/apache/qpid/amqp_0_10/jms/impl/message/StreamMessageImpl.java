@@ -64,10 +64,10 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
         _list = new ArrayList<Object>(LIST_MESSAGE_CAPACITY);
     }
 
-    StreamMessageImpl(SessionImpl ssn, int transferId, DeliveryProperties deliveryProps, MessageProperties msgProps,
-            ByteBuffer data)
+    StreamMessageImpl(SessionImpl ssn, int transferId, String consumerId, DeliveryProperties deliveryProps,
+            MessageProperties msgProps, ByteBuffer data)
     {
-        super(ssn, transferId, deliveryProps, msgProps);
+        super(ssn, transferId, consumerId, deliveryProps, msgProps);
         try
         {
             if (propertyExists(PAYLOAD_NULL_PROPERTY) || data == null)

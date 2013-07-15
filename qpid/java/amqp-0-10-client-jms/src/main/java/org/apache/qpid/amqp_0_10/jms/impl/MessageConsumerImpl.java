@@ -29,9 +29,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import javax.jms.Destination;
 import javax.jms.IllegalStateException;
-import javax.jms.InvalidDestinationException;
 import javax.jms.JMSException;
 import javax.jms.MessageConsumer;
 import javax.jms.MessageListener;
@@ -62,7 +60,7 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private final int _capacity;
 
-    private final String _consumerTag;
+    private final String _consumerId;
 
     private final AcknowledgeMode _ackMode;
 
@@ -88,19 +86,15 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private int _unsentCompletions = 0;
 
-    protected MessageConsumerImpl(String consumerTag, SessionImpl ssn, Destination dest, String selector,
+    protected MessageConsumerImpl(String consumerId, SessionImpl ssn, DestinationImpl dest, String selector,
             boolean noLocal, boolean browseOnly, AcknowledgeMode ackMode) throws JMSException
     {
-        if (!(dest instanceof DestinationImpl))
-        {
-            throw new InvalidDestinationException("Invalid destination class " + dest.getClass().getName());
-        }
         _session = ssn;
-        _dest = (DestinationImpl) dest;
+        _dest = dest;
         _ackMode = ackMode;
         _selector = selector;
         _noLocal = noLocal;
-        _consumerTag = consumerTag;
+        _consumerId = consumerId;
         _capacity = AddressResolution.evaluateCapacity(_session.getConnection().getConfig().getMaxPrefetch(), _dest,
                 CheckMode.RECEIVER);
         _localQueue = new LinkedBlockingQueue<MessageImpl>(_capacity);
@@ -110,7 +104,7 @@ public class MessageConsumerImpl implements MessageConsumer
         case TRANSACTED:
         case CLIENT_ACK:
         case DUPS_OK:
-            // we may want to revisit this for perf reasons.
+            // TODO we may want to revisit this for perf reasons.
             _replayQueue = new ArrayList<MessageImpl>(_capacity / 2);
             break;
         default:
@@ -125,10 +119,8 @@ public class MessageConsumerImpl implements MessageConsumer
     {
         try
         {
-            _subscriptionQueue = AddressResolution.verifyAndCreateSubscription(_session, _dest, _consumerTag, _ackMode,
-                    _noLocal);
+            _subscriptionQueue = AddressResolution.verifyAndCreateSubscription(this);
             setMessageFlowMode();
-            setMessageCredit(_capacity);
             _session.getAMQPSession().sync();
         }
         catch (Exception se)
@@ -171,7 +163,25 @@ public class MessageConsumerImpl implements MessageConsumer
         {
             throw new IllegalStateException("Message delivery is in progress with another listener");
         }
-        _msgListener = listener;
+
+        if (listener != null)
+        {
+            stopMessageDelivery();
+            _msgListener = listener;
+
+            if (!_localQueue.isEmpty())
+            {
+                // TODO should we release them or should we serve them to the
+                // listener?
+            }
+
+            if (isPrefetchDisabled())
+            {
+                setMessageCredit(1);
+            }
+
+            startMessageDelivery();
+        }
     }
 
     @Override
@@ -188,14 +198,13 @@ public class MessageConsumerImpl implements MessageConsumer
      * visible. Therefore messageReceive will check for close and release any
      * messages given to it, after it was closed.
      * 
-     * 2. Message delivery from this consumer is marked as stopped. [A consumer
-     * may already be in a stopped state (Ex due to connection.stop) before the
-     * close was called, and the dispatcher thread maybe waiting on the stopped
-     * condition. The thread is woken up. The subsequent check for close will
-     * release the message and return.]
+     * 2. Message delivery from this consumer is marked as stopped.The closing
+     * thread will then await completion, if message delivery is in progress.
      * 
-     * 3. The closing thread will then await completion, if message delivery is
-     * in progress.
+     * 3. A consumer may already be in a stopped state (Ex due to
+     * connection.stop) before the close was called, and the dispatcher thread
+     * maybe waiting on the stopped condition. The thread is woken up. The
+     * subsequent check for close will release the message and return.
      * 
      * 4. If sendClose == true, protocol commands will be issued to cancel the
      * subscription, release messages in it's local queue and replay buffer
@@ -225,10 +234,7 @@ public class MessageConsumerImpl implements MessageConsumer
             }
 
             stopMessageDelivery();
-
             _msgDeliveryStopped.wakeUpAndReturn();
-
-            waitForInProgressDeliveriesToStop();
 
             if (sendClose)
             {
@@ -284,7 +290,7 @@ public class MessageConsumerImpl implements MessageConsumer
             _msgDeliveryInProgress.setValueAndNotify(true);
             checkClosed();
             _syncReceiveThread = Thread.currentThread();
-            
+
             if (_localQueue.isEmpty() && isPrefetchDisabled())
             {
                 setMessageCredit(1);
@@ -325,11 +331,25 @@ public class MessageConsumerImpl implements MessageConsumer
     }
 
     void messageReceived(MessageImpl m)
-    {        
-        releaseMessageIfClosed(m);
-        _msgDeliveryStopped.waitUntilFalse();        
-        _msgDeliveryInProgress.setValueAndNotify(true);
-        releaseMessageIfClosed(m);
+    {
+        if (isClosed())
+        {
+            releaseMessageAndLogException(m);
+            return;
+        }
+
+        _msgDeliveryStopped.waitUntilFalse();
+
+        if (isClosed())
+        {
+            releaseMessageAndLogException(m);
+            return;
+        }
+        else
+        {
+            _msgDeliveryInProgress.setValueAndNotify(true);
+        }
+
         try
         {
             if (_msgListener != null)
@@ -340,7 +360,6 @@ public class MessageConsumerImpl implements MessageConsumer
                     if (isPrefetchDisabled())
                     {
                         setMessageCredit(1);
-                        sendMessageFlush();
                     }
                     postDeliver(m);
                 }
@@ -412,7 +431,7 @@ public class MessageConsumerImpl implements MessageConsumer
         stopMessageDelivery();
         try
         {
-            _session.getAMQPSession().messageStop(_consumerTag, Option.UNRELIABLE);
+            _session.getAMQPSession().messageStop(_consumerId, Option.UNRELIABLE);
         }
         catch (Exception e)
         {
@@ -550,20 +569,45 @@ public class MessageConsumerImpl implements MessageConsumer
         }
     }
 
-    private void setMessageFlowMode() throws JMSException
+    protected SessionImpl getSession()
+    {
+        return _session;
+    }
+
+    protected AcknowledgeMode getAckMode()
+    {
+        return _ackMode;
+    }
+
+    protected String getConsumerId()
+    {
+        return _consumerId;
+    }
+
+    protected void setSubscriptionQueue(String queueName)
+    {
+        _subscriptionQueue = queueName;
+    }
+
+    protected String getSubscriptionQueue()
+    {
+        return _subscriptionQueue;
+    }
+
+    protected void setMessageFlowMode() throws JMSException
     {
         try
         {
             if (_capacity == 0)
             {
                 // No prefetch case
-                _session.getAMQPSession().messageSetFlowMode(_consumerTag, MessageFlowMode.CREDIT);
+                _session.getAMQPSession().messageSetFlowMode(_consumerId, MessageFlowMode.CREDIT);
             }
             else
             {
-                _session.getAMQPSession().messageSetFlowMode(_consumerTag, MessageFlowMode.WINDOW);
+                _session.getAMQPSession().messageSetFlowMode(_consumerId, MessageFlowMode.WINDOW);
             }
-            _session.getAMQPSession().messageFlow(_consumerTag, MessageCreditUnit.BYTE, 0xFFFFFFFF, Option.UNRELIABLE);
+            _session.getAMQPSession().messageFlow(_consumerId, MessageCreditUnit.BYTE, 0xFFFFFFFF, Option.UNRELIABLE);
         }
         catch (Exception e)
         {
@@ -575,19 +619,14 @@ public class MessageConsumerImpl implements MessageConsumer
     {
         try
         {
-            if (isStarted())
+            if (_capacity > 0)
             {
-                if (_capacity > 0)
-                {
-                    _session.getAMQPSession().messageFlow(_consumerTag, MessageCreditUnit.MESSAGE, credit,
-                            Option.UNRELIABLE);
-                }
-                else if (isMessageListener())
-                {
-                    _session.getAMQPSession()
-                            .messageFlow(_consumerTag, MessageCreditUnit.MESSAGE, 1, Option.UNRELIABLE);
-                }
-                startMessageDelivery();
+                _session.getAMQPSession()
+                        .messageFlow(_consumerId, MessageCreditUnit.MESSAGE, credit, Option.UNRELIABLE);
+            }
+            else if (isMessageListener())
+            {
+                _session.getAMQPSession().messageFlow(_consumerId, MessageCreditUnit.MESSAGE, 1, Option.UNRELIABLE);
             }
         }
         catch (Exception e)
@@ -618,7 +657,7 @@ public class MessageConsumerImpl implements MessageConsumer
     {
         try
         {
-            _session.getAMQPSession().messageCancel(_consumerTag);
+            _session.getAMQPSession().messageCancel(_consumerId);
         }
         catch (Exception e)
         {
@@ -630,7 +669,7 @@ public class MessageConsumerImpl implements MessageConsumer
     {
         try
         {
-            _session.getAMQPSession().messageFlush(_consumerTag);
+            _session.getAMQPSession().messageFlush(_consumerId);
         }
         catch (Exception e)
         {
@@ -651,23 +690,20 @@ public class MessageConsumerImpl implements MessageConsumer
         }
     }
 
-    private void releaseMessageIfClosed(MessageImpl m)
+    private boolean isClosed()
     {
-        if (_closed.get() || _session.isClosed())
+        return _closed.get() || _session.isClosed();
+    }
+
+    private void releaseMessageAndLogException(MessageImpl m)
+    {
+        try
         {
-            try
-            {
-                releaseMessage(m);
-            }
-            catch (JMSException e)
-            {
-                _logger.warn(e, "Error trying to release message for closed consumer");
-            }
-            finally
-            {
-                _msgDeliveryInProgress.setValueAndNotify(false);
-            }
-            return;
+            releaseMessage(m);
+        }
+        catch (JMSException e)
+        {
+            _logger.warn(e, "Error trying to release message for closed consumer");
         }
     }
 
@@ -697,10 +733,5 @@ public class MessageConsumerImpl implements MessageConsumer
     private boolean isPrefetchDisabled()
     {
         return _capacity == 0;
-    }
-
-    private boolean isStarted()
-    {
-        return _session.getConnection().isStarted();
     }
 }

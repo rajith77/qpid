@@ -1,4 +1,6 @@
-/* Licensed to the Apache Software Foundation (ASF) under one
+/*
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
  * regarding copyright ownership.  The ASF licenses this file
@@ -14,25 +16,32 @@
  * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
+ *
  */
-package org.apache.qpid.amqp_0_10.jms;
-
-import java.nio.ByteBuffer;
+package org.apache.qpid.amqp_0_10.jms.impl;
 
 import javax.jms.JMSException;
+import javax.jms.TemporaryTopic;
 
-import org.apache.qpid.transport.DeliveryProperties;
-import org.apache.qpid.transport.MessageProperties;
-
-public interface AmqpMessage extends javax.jms.Message
+public class TemporaryTopicImpl extends TopicImpl implements TemporaryTopic
 {
-    public int getTransferId();
+    private final SessionImpl _session;
 
-    public String getConsumerId();
+    public TemporaryTopicImpl(SessionImpl session, String address) throws JMSException
+    {
+        super(address);
+        _session = session;
+    }
 
-    public DeliveryProperties getDeliveryProperties();
+    @Override
+    public void delete() throws JMSException
+    {
+        // TODO Auto-generated method stub
 
-    public MessageProperties getMessageProperties();
+    }
 
-    public ByteBuffer getContent() throws JMSException;
+    SessionImpl getSession()
+    {
+        return _session;
+    }
 }

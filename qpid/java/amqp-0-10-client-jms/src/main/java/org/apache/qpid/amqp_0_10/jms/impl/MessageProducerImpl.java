@@ -25,7 +25,6 @@ import static org.apache.qpid.transport.Option.SYNC;
 
 import java.nio.ByteBuffer;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -110,15 +109,11 @@ public class MessageProducerImpl implements MessageProducer
 
     private int _count = 0;
 
-    protected MessageProducerImpl(SessionImpl ssn, Destination dest) throws JMSException
+    protected MessageProducerImpl(SessionImpl ssn, DestinationImpl dest) throws JMSException
     {
-        if (!(dest instanceof DestinationImpl))
-        {
-            throw new InvalidDestinationException("Invalid destination class " + dest.getClass().getName());
-        }
         _session = ssn;
 
-        _dest = (DestinationImpl) dest;
+        _dest = dest;
 
         _publishMode = ssn.getConnection().getConfig().getPublishMode();
 
@@ -279,9 +274,9 @@ public class MessageProducerImpl implements MessageProducer
         try
         {
             _msgSenderStopped.waitUntilFalse();
+            _msgSendingInProgress.setValueAndNotify(true);
             // Check right before we send.
             checkClosed();
-            _msgSendingInProgress.setValueAndNotify(true);
 
             ByteBuffer buffer = data == null ? ByteBuffer.allocate(0) : data.slice();
 
@@ -325,7 +320,7 @@ public class MessageProducerImpl implements MessageProducer
     }
 
     @Override
-    public Destination getDestination() throws JMSException
+    public DestinationImpl getDestination() throws JMSException
     {
         checkClosed();
         return _dest;

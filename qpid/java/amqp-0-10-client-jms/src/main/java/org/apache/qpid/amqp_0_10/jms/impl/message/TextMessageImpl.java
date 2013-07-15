@@ -62,10 +62,10 @@ public class TextMessageImpl extends MessageImpl implements TextMessage, Content
         }
     }
 
-    TextMessageImpl(SessionImpl ssn, int transferId, DeliveryProperties deliveryProps, MessageProperties msgProps,
-            ByteBuffer data)
+    TextMessageImpl(SessionImpl ssn, int transferId, String consumerId, DeliveryProperties deliveryProps,
+            MessageProperties msgProps, ByteBuffer data)
     {
-        super(ssn, transferId, deliveryProps, msgProps);
+        super(ssn, transferId, consumerId, deliveryProps, msgProps);
         try
         {
             if (propertyExists(PAYLOAD_NULL_PROPERTY) || data == null || data.remaining() == 0)

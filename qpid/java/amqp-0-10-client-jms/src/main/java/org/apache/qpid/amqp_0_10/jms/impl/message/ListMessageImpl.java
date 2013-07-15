@@ -40,10 +40,10 @@ public class ListMessageImpl extends StreamMessageImpl implements ListMessage
         super();
     }
 
-    public ListMessageImpl(SessionImpl ssn, int transferId, DeliveryProperties deliveryProps,
+    public ListMessageImpl(SessionImpl ssn, int transferId, String consumerId, DeliveryProperties deliveryProps,
             MessageProperties msgProps, ByteBuffer data)
     {
-        super(ssn, transferId, deliveryProps, msgProps, data);
+        super(ssn, transferId, consumerId, deliveryProps, msgProps, data);
     }
 
     @Override

@@ -20,15 +20,8 @@
  */
 package org.apache.qpid.amqp_0_10.jms.impl;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.ConcurrentHashMap;
 
 import javax.jms.Connection;
 import javax.jms.ConnectionConsumer;
@@ -49,12 +42,8 @@ import javax.jms.TopicSession;
 
 import org.apache.qpid.client.AMQConnectionURL;
 import org.apache.qpid.client.JmsNotImplementedException;
-import org.apache.qpid.client.message.MessageFactory;
 import org.apache.qpid.client.transport.ClientConnectionDelegate;
 import org.apache.qpid.configuration.ClientProperties;
-import org.apache.qpid.jms.BrokerDetails;
-import org.apache.qpid.jms.ConnectionURL;
-import org.apache.qpid.properties.ConnectionStartProperties;
 import org.apache.qpid.transport.ConnectionException;
 import org.apache.qpid.transport.ConnectionListener;
 import org.apache.qpid.transport.ConnectionSettings;
@@ -64,6 +53,8 @@ import org.apache.qpid.transport.SessionDetachCode;
 import org.apache.qpid.transport.SessionException;
 import org.apache.qpid.transport.SessionListener;
 import org.apache.qpid.transport.util.Logger;
+import org.apache.qpid.util.ConditionManager;
+import org.apache.qpid.util.ConditionManagerTimeoutException;
 import org.apache.qpid.util.ExceptionHelper;
 
 public class ConnectionImpl implements Connection, TopicConnection, QueueConnection, ConnectionListener,
@@ -76,17 +67,13 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         UNCONNECTED, STOPPED, STARTED, CLOSED
     }
 
-    private final Lock _conditionLock = new ReentrantLock();
-
     private final Object _lock = new Object();
 
-    private AtomicBoolean _failoverInProgress = new AtomicBoolean(false);
-
-    private final Condition _failoverComplete = _conditionLock.newCondition();
+    private ConditionManager _failoverInProgress = new ConditionManager(false);
 
     private org.apache.qpid.transport.Connection _amqpConnection;
 
-    private final List<SessionImpl> _sessions = new ArrayList<SessionImpl>();
+    private final Map<org.apache.qpid.transport.Session, SessionImpl> _sessions = new ConcurrentHashMap<org.apache.qpid.transport.Session, SessionImpl>();
 
     private volatile State _state = State.UNCONNECTED;
 
@@ -105,7 +92,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         _url = url;
         _amqpConnection = new org.apache.qpid.transport.Connection();
         _amqpConnection.addConnectionListener(this);
-        _config = new ConnectionConfig(url);
+        _config = new ConnectionConfig(this);
     }
 
     private void connect(ConnectionSettings conSettings) throws JMSException
@@ -158,7 +145,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             if (_state != State.CLOSED)
             {
                 stop();
-                for (SessionImpl session : _sessions)
+                for (SessionImpl session : _sessions.values())
                 {
                     session.closeImpl(true, false);
                 }
@@ -203,13 +190,18 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         {
             if (_state == State.UNCONNECTED)
             {
-                ConnectionSettings conSettings = retrieveConnectionSettings(_url.getBrokerDetails(0));
+                ConnectionSettings conSettings = _config.retrieveConnectionSettings(_url.getBrokerDetails(0));
                 connect(conSettings);
             }
             SessionImpl ssn = new SessionImpl(this, ackMode);
-            _sessions.add(ssn);
+            _sessions.put(ssn.getAMQPSession(), ssn);
             return ssn;
         }
+    }
+
+    AMQConnectionURL getConnectionURL()
+    {
+        return _url;
     }
 
     @Override
@@ -257,7 +249,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
             if (_state == State.UNCONNECTED)
             {
-                ConnectionSettings conSettings = retrieveConnectionSettings(_url.getBrokerDetails(0));
+                ConnectionSettings conSettings = _config.retrieveConnectionSettings(_url.getBrokerDetails(0));
                 connect(conSettings);
                 _state = State.STARTED;
             }
@@ -266,7 +258,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             {
                 _state = State.STARTED;
 
-                for (SessionImpl session : _sessions)
+                for (SessionImpl session : _sessions.values())
                 {
                     session.start();
                 }
@@ -284,7 +276,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             checkClosed();
             if (_state == State.STARTED)
             {
-                for (SessionImpl session : _sessions)
+                for (SessionImpl session : _sessions.values())
                 {
                     session.stop();
                 }
@@ -320,14 +312,15 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     {
         // TODO Auto-generated method stub
     }
+
     // -----------------------------------------
-    
+
     org.apache.qpid.transport.Connection getAMQPConnection()
     {
         return _amqpConnection;
     }
 
-    void removeSession(SessionImpl ssn)
+    void removeSession(SessionImpl ssn, boolean releaseMsgsInDispatchQueue)
     {
         synchronized (_lock)
         {
@@ -342,42 +335,22 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     boolean isFailoverInProgress()
     {
-        return _failoverInProgress.get();
+        return _failoverInProgress.getCurrentValue();
     }
-    
+
+    void waitForFailoverToComplete()
+    {
+        _failoverInProgress.waitUntilFalse();
+    }
+
     /**
-     * @param timeout : If timeout == 0, then wait until true.
+     * @param timeout
+     *            : If timeout == 0, then wait until true.
      * @return
      */
-    long waitForFailoverToComplete(long timeout) throws InterruptedException
+    long waitForFailoverToComplete(long timeout) throws ConditionManagerTimeoutException
     {
-        if (_failoverInProgress.get())
-        {
-            _conditionLock.lock();
-            try
-            {
-                synchronized (_failoverInProgress)
-                {
-                    if (_failoverInProgress.get())
-                    {
-                        long remaining = _failoverComplete.awaitNanos(TimeUnit.MILLISECONDS.toNanos(timeout));
-                        return TimeUnit.NANOSECONDS.toMillis(remaining);
-                    }
-                    else
-                    {
-                        return timeout;
-                    }
-                }
-            }
-            finally
-            {
-                _conditionLock.unlock();
-            }
-        }
-        else
-        {
-            return timeout;
-        }
+        return _failoverInProgress.waitUntilFalse(timeout);
     }
 
     ConnectionConfig getConfig()
@@ -422,42 +395,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     }
 
     // --------------------------------------
-    
-    private ConnectionSettings retrieveConnectionSettings(BrokerDetails brokerDetail)
-    {
-        ConnectionSettings conSettings = brokerDetail.buildConnectionSettings();
-
-        conSettings.setVhost(_url.getVirtualHost());
-        conSettings.setUsername(_url.getUsername());
-        conSettings.setPassword(_url.getPassword());
-
-        // Pass client name from connection URL
-        Map<String, Object> clientProps = new HashMap<String, Object>();
-        clientProps.put(ConnectionStartProperties.CLIENT_ID_0_10, _clientId);
-        conSettings.setClientProperties(clientProps);
-
-        conSettings.setHeartbeatInterval(getHeartbeatInterval(brokerDetail));
-
-        // Check connection-level ssl override setting
-        String connectionSslOption = _url.getOption(ConnectionURL.OPTIONS_SSL);
-        if (connectionSslOption != null)
-        {
-            boolean connUseSsl = Boolean.parseBoolean(connectionSslOption);
-            boolean brokerlistUseSsl = conSettings.isUseSSL();
-
-            if (connUseSsl != brokerlistUseSsl)
-            {
-                conSettings.setUseSSL(connUseSsl);
-
-                if (_logger.isDebugEnabled())
-                {
-                    _logger.debug("Applied connection ssl option override, setting UseSsl to: " + connUseSsl);
-                }
-            }
-        }
-
-        return conSettings;
-    }
 
     private void verifyClientID() throws InvalidClientIDException
     {
@@ -509,36 +446,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 throw new IllegalStateException("Connection is " + _state);
             }
         }
-    }
-
-    // The idle_timeout prop is in milisecs while
-    // the new heartbeat prop is in secs
-    private int getHeartbeatInterval(BrokerDetails brokerDetail)
-    {
-        int heartbeat = 0;
-        if (brokerDetail.getProperty(BrokerDetails.OPTIONS_IDLE_TIMEOUT) != null)
-        {
-            _logger.warn("Broker property idle_timeout=<mili_secs> is deprecated, please use heartbeat=<secs>");
-            heartbeat = Integer.parseInt(brokerDetail.getProperty(BrokerDetails.OPTIONS_IDLE_TIMEOUT)) / 1000;
-        }
-        else if (brokerDetail.getProperty(BrokerDetails.OPTIONS_HEARTBEAT) != null)
-        {
-            heartbeat = Integer.parseInt(brokerDetail.getProperty(BrokerDetails.OPTIONS_HEARTBEAT));
-        }
-        else if (Integer.getInteger(ClientProperties.IDLE_TIMEOUT_PROP_NAME) != null)
-        {
-            heartbeat = Integer.getInteger(ClientProperties.IDLE_TIMEOUT_PROP_NAME) / 1000;
-            _logger.warn("JVM arg -Didle_timeout=<mili_secs> is deprecated, please use -Dqpid.heartbeat=<secs>");
-        }
-        else if (Integer.getInteger(ClientProperties.HEARTBEAT) != null)
-        {
-            heartbeat = Integer.getInteger(ClientProperties.HEARTBEAT, ClientProperties.HEARTBEAT_DEFAULT);
-        }
-        else
-        {
-            heartbeat = Integer.getInteger("amqj.heartbeat.delay", ClientProperties.HEARTBEAT_DEFAULT);
-        }
-        return heartbeat;
     }
 
     // ----------------------------------------

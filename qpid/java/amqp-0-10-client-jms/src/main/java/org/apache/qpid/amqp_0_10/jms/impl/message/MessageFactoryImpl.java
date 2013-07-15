@@ -37,6 +37,7 @@ import org.apache.qpid.amqp_0_10.jms.impl.SessionImpl;
 import org.apache.qpid.jms.ListMessage;
 import org.apache.qpid.transport.DeliveryProperties;
 import org.apache.qpid.transport.MessageProperties;
+import org.apache.qpid.transport.MessageTransfer;
 
 public class MessageFactoryImpl implements MessageFactory, ContentTypes
 {
@@ -97,9 +98,12 @@ public class MessageFactoryImpl implements MessageFactory, ContentTypes
     }
 
     @Override
-    public Message createMessage(Session ssn, int transferId, DeliveryProperties deliveryProps,
-            MessageProperties msgProps, ByteBuffer data)
+    public Message createMessage(Session ssn, MessageTransfer transfer)
     {
+        DeliveryProperties deliveryProps = transfer.getHeader().getDeliveryProperties();
+        MessageProperties msgProps = transfer.getHeader().getMessageProperties();
+        ByteBuffer data = transfer.getBody();
+
         MessageType type = MessageType.BINARY;
         if (msgProps != null)
         {
@@ -112,15 +116,20 @@ public class MessageFactoryImpl implements MessageFactory, ContentTypes
         switch (type)
         {
         case STRING:
-            return new TextMessageImpl((SessionImpl) ssn, transferId, deliveryProps, msgProps, data);
+            return new TextMessageImpl((SessionImpl) ssn, transfer.getId(), transfer.getDestination(), deliveryProps,
+                    msgProps, data);
         case MAP:
-            return new MapMessageImpl((SessionImpl) ssn, transferId, deliveryProps, msgProps, data);
+            return new MapMessageImpl((SessionImpl) ssn, transfer.getId(), transfer.getDestination(), deliveryProps,
+                    msgProps, data);
         case LIST:
-            return new ListMessageImpl((SessionImpl) ssn, transferId, deliveryProps, msgProps, data);
+            return new ListMessageImpl((SessionImpl) ssn, transfer.getId(), transfer.getDestination(), deliveryProps,
+                    msgProps, data);
         case JAVA_OBJECT:
-            return new ObjectMessageImpl((SessionImpl) ssn, transferId, deliveryProps, msgProps, data);
+            return new ObjectMessageImpl((SessionImpl) ssn, transfer.getId(), transfer.getDestination(), deliveryProps,
+                    msgProps, data);
         default:
-            return new BytesMessageImpl((SessionImpl) ssn, transferId, deliveryProps, msgProps, data);
+            return new BytesMessageImpl((SessionImpl) ssn, transfer.getId(), transfer.getDestination(), deliveryProps,
+                    msgProps, data);
         }
     }
 

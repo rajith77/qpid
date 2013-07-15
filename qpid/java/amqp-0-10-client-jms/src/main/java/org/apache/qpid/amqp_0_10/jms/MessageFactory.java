@@ -30,6 +30,7 @@ import javax.jms.TextMessage;
 import org.apache.qpid.jms.ListMessage;
 import org.apache.qpid.transport.DeliveryProperties;
 import org.apache.qpid.transport.MessageProperties;
+import org.apache.qpid.transport.MessageTransfer;
 
 public interface MessageFactory
 {
@@ -55,8 +56,7 @@ public interface MessageFactory
 
     public ListMessage createListMessage();
 
-    public Message createMessage(Session ssn, int transferId, DeliveryProperties deliveryProps,
-            MessageProperties msgProps, ByteBuffer data);
+    public Message createMessage(Session ssn, MessageTransfer transfer);
 
     /**
      * You could use this method to map your custom content-type to one of the

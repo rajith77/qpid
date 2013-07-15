@@ -1,4 +1,6 @@
-/* Licensed to the Apache Software Foundation (ASF) under one
+/*
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
  * regarding copyright ownership.  The ASF licenses this file
@@ -14,25 +16,26 @@
  * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
+ *
  */
-package org.apache.qpid.amqp_0_10.jms;
-
-import java.nio.ByteBuffer;
+package org.apache.qpid.amqp_0_10.jms.impl;
 
 import javax.jms.JMSException;
+import javax.jms.Queue;
+import javax.jms.QueueReceiver;
 
-import org.apache.qpid.transport.DeliveryProperties;
-import org.apache.qpid.transport.MessageProperties;
-
-public interface AmqpMessage extends javax.jms.Message
+public class QueueReceiverImpl extends MessageConsumerImpl implements QueueReceiver
 {
-    public int getTransferId();
 
-    public String getConsumerId();
+    public QueueReceiverImpl(String consumerId, SessionImpl ssn, QueueImpl queue, String selector, boolean noLocal,
+            boolean browseOnly, AcknowledgeMode ackMode) throws JMSException
+    {
+        super(consumerId, ssn, queue, selector, noLocal, browseOnly, ackMode);
+    }
 
-    public DeliveryProperties getDeliveryProperties();
-
-    public MessageProperties getMessageProperties();
-
-    public ByteBuffer getContent() throws JMSException;
+    @Override
+    public Queue getQueue() throws JMSException
+    {
+        return (QueueImpl) getDestination();
+    }
 }

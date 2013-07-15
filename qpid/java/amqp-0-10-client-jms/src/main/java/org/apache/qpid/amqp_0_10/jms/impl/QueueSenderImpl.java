@@ -21,21 +21,33 @@
 package org.apache.qpid.amqp_0_10.jms.impl;
 
 import javax.jms.JMSException;
-import javax.jms.Topic;
-import javax.jms.TopicSubscriber;
+import javax.jms.Message;
+import javax.jms.Queue;
+import javax.jms.QueueSender;
 
-public class TopicSubscriberImpl extends MessageConsumerImpl implements TopicSubscriber
+public class QueueSenderImpl extends MessageProducerImpl implements QueueSender
 {
 
-    public TopicSubscriberImpl(String consumerId, SessionImpl ssn, TopicImpl topic, String selector, boolean noLocal,
-            boolean browseOnly, AcknowledgeMode ackMode) throws JMSException
+    public QueueSenderImpl(SessionImpl ssn, QueueImpl queue) throws JMSException
     {
-        super(consumerId, ssn, topic, selector, noLocal, browseOnly, ackMode);
+        super(ssn, queue);
     }
 
     @Override
-    public Topic getTopic() throws JMSException
+    public Queue getQueue() throws JMSException
     {
-        return (TopicImpl) getDestination();
+        return (QueueImpl) getDestination();
+    }
+
+    @Override
+    public void send(Queue queue, Message msg) throws JMSException
+    {
+        send(queue, msg);
+    }
+
+    @Override
+    public void send(Queue queue, Message msg, int deliveryMode, int priority, long timeToLive) throws JMSException
+    {
+        send(queue, msg, deliveryMode, priority, timeToLive);
     }
 }

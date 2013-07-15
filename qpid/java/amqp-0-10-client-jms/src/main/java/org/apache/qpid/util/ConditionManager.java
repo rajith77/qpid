@@ -20,54 +20,130 @@
  */
 package org.apache.qpid.util;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-
 public class ConditionManager
 {
-    private AtomicBoolean _condition;
+    final Object _lock = new Object();
+
+    private boolean _value;
+
+    private boolean _continue;
 
     public ConditionManager(boolean initialValue)
     {
-        _condition = new AtomicBoolean(initialValue);
+        _value = initialValue;
+        _continue = true;
     }
 
     public void setValueAndNotify(boolean value)
     {
-        synchronized (_condition)
+        synchronized (_lock)
         {
-            if (_condition.compareAndSet(!value, value))
+            if (_value != value)
             {
-                _condition.notifyAll();
+                _value = value;
+                _lock.notifyAll();
             }
+        }
+    }
+
+    public void wakeUpAndReturn()
+    {
+        synchronized (_lock)
+        {
+            _continue = false;
+            _lock.notifyAll();
+        }
+    }
+
+    public void resetToContinue()
+    {
+        synchronized (_lock)
+        {
+            _continue = true;
         }
     }
 
     public void waitUntilFalse()
     {
-        if (!_condition.get())
+        waitImpl(_value, -1);
+    }
+
+    public long waitUntilFalse(long timeout) throws ConditionManagerTimeoutException
+    {
+        long remaining = waitImpl(_value, timeout);
+        if (_value)
         {
-            return;
+            throw new ConditionManagerTimeoutException("Timed out waiting for condition to become false");
         }
         else
         {
-            synchronized (_condition)
+            return remaining;
+        }
+    }
+
+    public void waitUntilTrue()
+    {
+        waitImpl(!_value, -1);
+    }
+
+    public long waitUntilTrue(long timeout) throws ConditionManagerTimeoutException
+    {
+        long remaining = waitImpl(!_value, timeout);
+        if (!_value)
+        {
+            throw new ConditionManagerTimeoutException("Timed out waiting for condition to become true");
+        }
+        else
+        {
+            return remaining;
+        }
+    }
+
+    long waitImpl(boolean condition, long timeout)
+    {
+        synchronized (_lock)
+        {
+            long start = 0;
+            long elapsed = 0;
+            while (condition && _continue)
             {
-                while (_condition.get())
+                if (timeout > 0)
                 {
-                    try
+                    start = System.currentTimeMillis();
+                }
+                try
+                {
+                    if (timeout < 0)
                     {
-                        _condition.wait();
+                        _lock.wait();
                     }
-                    catch (InterruptedException e)
-                    {// ignore.
+                    else
+                    {
+                        _lock.wait(timeout - elapsed);
+                    }
+                }
+                catch (InterruptedException e)
+                {
+                }
+
+                if (timeout > 0)
+                {
+                    elapsed = System.currentTimeMillis() - start;
+                    if (timeout - elapsed <= 0)
+                    {
+                        break;
                     }
                 }
             }
+            return timeout - elapsed;
         }
     }
 
     public boolean getCurrentValue()
     {
-        return _condition.get();
+        synchronized (_lock)
+        {
+            return _value;
+        }
     }
 }

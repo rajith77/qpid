@@ -23,6 +23,8 @@ import java.util.UUID;
 
 import javax.jms.InvalidDestinationException;
 import javax.jms.JMSException;
+import javax.jms.Queue;
+import javax.jms.Topic;
 
 import org.apache.qpid.address.Address;
 import org.apache.qpid.address.AddressHelper;
@@ -60,14 +62,21 @@ public class AddressResolution
         QUEUE, EXCHANGE, AMBIGUOUS, NOT_FOUND
     };
 
-    public static String verifyAndCreateSubscription(SessionImpl ssn, DestinationImpl dest, String consumerId,
-            AcknowledgeMode ackMode, boolean noLocal) throws JMSException
+    /**
+     * If a subscription queue name is given, it will be used. If not link name
+     * or in the absence of it a generated name will be used.
+     */
+    public static String verifyAndCreateSubscription(MessageConsumerImpl cons) throws JMSException
     {
+        SessionImpl ssn = cons.getSession();
+        DestinationImpl dest = cons.getDestination();
+
         NodeType nodeType = AddressResolution.resolveDestination(ssn, dest, CheckMode.RECEIVER);
         String subscriptionQueue;
         if (NodeType.TOPIC == nodeType)
         {
-            subscriptionQueue = AddressResolution.createSubscriptionQueue(ssn, dest, noLocal);
+            subscriptionQueue = AddressResolution.createSubscriptionQueue(ssn, dest, cons.getNoLocal(),
+                    cons.getSubscriptionQueue());
             handleLinkCreation(ssn, dest, dest.getAddress().getName(), subscriptionQueue);
         }
         else
@@ -84,8 +93,8 @@ public class AddressResolution
 
         try
         {
-            ssn.getAMQPSession().messageSubscribe(subscriptionQueue, consumerId, getMessageAcceptMode(ackMode),
-                    getMessageAcquireMode(dest), null, 0, args,
+            ssn.getAMQPSession().messageSubscribe(subscriptionQueue, cons.getConsumerId(),
+                    getMessageAcceptMode(cons.getAckMode()), getMessageAcquireMode(dest), null, 0, args,
                     dest.getAddress().getLink().getSubscription().isExclusive() ? Option.EXCLUSIVE : Option.NONE);
         }
         catch (Exception e)
@@ -144,28 +153,97 @@ public class AddressResolution
         }
     }
 
+    public static void verifyAndCreateDurableTopicSubscription(MessageConsumerImpl cons) throws JMSException
+    {
+        SessionImpl ssn = cons.getSession();
+        DestinationImpl dest = cons.getDestination();
+        String subscriptionQueue = cons.getSubscriptionQueue();
+
+        Address addr = dest.getAddress();
+        Node node = addr.getNode();
+        if (node.getType() == NodeType.QUEUE)
+        {
+            throw new InvalidDestinationException("Invalid Topic! The address string denotes it as a queue [" + addr
+                    + "]");
+        }
+
+        NodeQueryStatus status = verifyNodeExists(ssn, dest);
+        switch (status)
+        {
+        case QUEUE:
+            throw new InvalidDestinationException("Invalid Topic! The address name '" + addr.getName()
+                    + "' resolves to a Queue");
+        case EXCHANGE:
+        case AMBIGUOUS:
+            if (checkAddressPolicy(node.getAssertPolicy(), CheckMode.RECEIVER))
+            {
+                assertExchange(ssn, dest, CheckMode.RECEIVER);
+            }
+            break;
+        case NOT_FOUND:
+            if (checkAddressPolicy(node.getCreatePolicy(), CheckMode.RECEIVER))
+            {
+                handleExchangeCreation(ssn, dest);
+                break;
+            }
+            else
+            {
+
+                throw new InvalidDestinationException("The name '" + addr.getName()
+                        + "' supplied in the address doesn't resolve to an exchange");
+            }
+        }
+
+        try
+        {
+            ExchangeBoundResult result = ssn.getAMQPSession()
+                    .exchangeBound(addr.getName(), subscriptionQueue, addr.getSubject(), null).get();
+            boolean createQueue = false;
+            if (result.getQueueNotFound())
+            {
+                createQueue = true;
+            }
+            else if (!(result.getKeyNotMatched() || result.getArgsNotMatched()))
+            {
+                // The queue is bound to the exchange with a different key and args.
+                // We need to delete that association as per the JMS spec.
+                ssn.getAMQPSession().queueDelete(subscriptionQueue);
+                createQueue = true;
+            }
+
+            if (createQueue)
+            {
+                SubscriptionQueue queue = addr.getLink().getSubscriptionQueue();
+                Map<String, Object> args = queue.getDeclareArgs();
+                ssn.getAMQPSession().queueDeclare(subscriptionQueue, queue.getAlternateExchange(),
+                        args.size() > 0 ? args : null, queue.isAutoDelete() ? Option.AUTO_DELETE : Option.NONE,
+                        Option.DURABLE, Option.EXCLUSIVE);
+            }
+            ssn.getAMQPSession().exchangeBind(subscriptionQueue, addr.getName(), addr.getSubject(), null);
+        }
+        catch (Exception e)
+        {
+            throw ExceptionHelper.toJMSException(
+                    "Error creating queue for durable subscription for Topic [" + dest.getAddress() + "]", e);
+        }
+    }
+
     static NodeType resolveDestination(SessionImpl ssn, DestinationImpl dest, CheckMode mode) throws JMSException
     {
         NodeQueryStatus status = verifyNodeExists(ssn, dest);
         switch (status)
         {
         case QUEUE:
-            if (checkAddressPolicy(dest.getAddress().getNode().getAssertPolicy(), mode))
-            {
-                assertQueue(ssn, dest, mode);
-            }
+            verifyQueue(ssn, dest, mode);
             return NodeType.QUEUE;
         case EXCHANGE:
-            if (checkAddressPolicy(dest.getAddress().getNode().getAssertPolicy(), mode))
-            {
-                assertExchange(ssn, dest, mode);
-            }
+            verifyTopic(ssn, dest, mode);
             return NodeType.TOPIC;
         case NOT_FOUND:
             if (checkAddressPolicy(dest.getAddress().getNode().getCreatePolicy(), mode))
             {
                 NodeType type = dest.getAddress().getNode().getType();
-                if (type == NodeType.TOPIC)
+                if (type == NodeType.TOPIC || dest instanceof Topic)
                 {
                     handleExchangeCreation(ssn, dest);
                     return NodeType.TOPIC;
@@ -179,11 +257,59 @@ public class AddressResolution
             }
             else
             {
+
                 throw new InvalidDestinationException("The name '" + dest.getAddress().getName()
                         + "' supplied in the address doesn't resolve to an exchange or a queue");
             }
         default: // AMBIGUOUS
+            NodeType type = dest.getAddress().getNode().getType();
+            if (type == NodeType.QUEUE || dest instanceof Queue)
+            {
+                verifyQueue(ssn, dest, mode);
+            }
+            else if (type == NodeType.TOPIC || dest instanceof Topic)
+            {
+                verifyTopic(ssn, dest, mode);
+            }
             throw new InvalidDestinationException("Ambiguous address, please specify node type as 'queue' or 'topic'");
+        }
+    }
+
+    static void verifyQueue(SessionImpl ssn, DestinationImpl dest, CheckMode mode) throws JMSException
+    {
+        if (dest instanceof Topic)
+        {
+            throw new InvalidDestinationException("Invalid Topic!. The address name '" + dest.getAddress().getName()
+                    + "' resolves to a Queue");
+        }
+        if (dest.getAddress().getNode().getType() == NodeType.TOPIC)
+        {
+            throw new InvalidDestinationException("The address name '" + dest.getAddress().getName()
+                    + "' resolves to a Queue, all though the address string denotes it as a topic ["
+                    + dest.getAddress() + "]");
+        }
+        if (checkAddressPolicy(dest.getAddress().getNode().getAssertPolicy(), mode))
+        {
+            assertQueue(ssn, dest, mode);
+        }
+    }
+
+    static void verifyTopic(SessionImpl ssn, DestinationImpl dest, CheckMode mode) throws JMSException
+    {
+        if (dest instanceof Queue)
+        {
+            throw new InvalidDestinationException("Invalid Queue!. The address name '" + dest.getAddress().getName()
+                    + "' resolves to a Topic");
+        }
+        if (dest.getAddress().getNode().getType() == NodeType.QUEUE)
+        {
+            throw new InvalidDestinationException("The address name '" + dest.getAddress().getName()
+                    + "' resolves to a Topic, all though the address string denotes it as a queue ["
+                    + dest.getAddress() + "]");
+        }
+        if (checkAddressPolicy(dest.getAddress().getNode().getAssertPolicy(), mode))
+        {
+            assertExchange(ssn, dest, mode);
         }
     }
 
@@ -305,14 +431,20 @@ public class AddressResolution
         }
     }
 
-    static String createSubscriptionQueue(SessionImpl ssn, DestinationImpl dest, boolean noLocal) throws JMSException
+    static String createSubscriptionQueue(SessionImpl ssn, DestinationImpl dest, boolean noLocal, String queueName)
+            throws JMSException
     {
         try
         {
             Link link = dest.getAddress().getLink();
             SubscriptionQueue queue = link.getSubscriptionQueue();
-            String name = link.getName() == null ? "TempQueue_" + UUID.randomUUID() : dest.getAddress().getLink()
-                    .getName();
+            String name = queueName;
+
+            if (name == null)
+            {
+                name = link.getName() == null ? "TempQueue_" + UUID.randomUUID() : dest.getAddress().getLink()
+                        .getName();
+            }
 
             Map<String, Object> args = queue.getDeclareArgs();
             if (noLocal)
@@ -324,6 +456,8 @@ public class AddressResolution
                     queue.isAutoDelete() ? Option.AUTO_DELETE : Option.NONE,
                     link.isDurable() ? Option.DURABLE : Option.NONE,
                     queue.isExclusive() ? Option.EXCLUSIVE : Option.NONE);
+
+            ssn.getAMQPSession().exchangeBind(name, dest.getAddress().getName(), dest.getAddress().getSubject(), null);
 
             ssn.getAMQPSession().sync();
             return name;
@@ -528,7 +662,7 @@ public class AddressResolution
             boolean match = false;
             Node node = dest.getAddress().getNode();
             QueueQueryResult result = ssn.getAMQPSession().queueQuery(node.getName(), Option.NONE).get();
-            match = node.getName().equals(result.getQueue());
+            match = result.hasQueue();
 
             if (match)
             {

@@ -45,10 +45,10 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
         _typedBytesContentWriter = new TypedBytesContentWriter();
     }
 
-    BytesMessageImpl(SessionImpl ssn, int transferId, DeliveryProperties deliveryProps,
+    BytesMessageImpl(SessionImpl ssn, int transferId, String consumerId, DeliveryProperties deliveryProps,
             MessageProperties msgProps, ByteBuffer data)
     {
-        super(ssn, transferId, deliveryProps, msgProps);
+        super(ssn, transferId, consumerId, deliveryProps, msgProps);
         _typedBytesContentReader = new TypedBytesContentReader(data);
     }
 

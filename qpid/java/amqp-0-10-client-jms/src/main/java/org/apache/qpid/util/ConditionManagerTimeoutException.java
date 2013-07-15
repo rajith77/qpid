@@ -1,4 +1,6 @@
-/* Licensed to the Apache Software Foundation (ASF) under one
+/*
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
  * regarding copyright ownership.  The ASF licenses this file
@@ -14,25 +16,15 @@
  * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
+ *
  */
-package org.apache.qpid.amqp_0_10.jms;
+package org.apache.qpid.util;
 
-import java.nio.ByteBuffer;
-
-import javax.jms.JMSException;
-
-import org.apache.qpid.transport.DeliveryProperties;
-import org.apache.qpid.transport.MessageProperties;
-
-public interface AmqpMessage extends javax.jms.Message
+@SuppressWarnings("serial")
+public class ConditionManagerTimeoutException extends Exception
 {
-    public int getTransferId();
-
-    public String getConsumerId();
-
-    public DeliveryProperties getDeliveryProperties();
-
-    public MessageProperties getMessageProperties();
-
-    public ByteBuffer getContent() throws JMSException;
+    public ConditionManagerTimeoutException(String message)
+    {
+        super(message);
+    }
 }

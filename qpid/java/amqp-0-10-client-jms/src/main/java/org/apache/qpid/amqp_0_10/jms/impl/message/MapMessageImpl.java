@@ -63,10 +63,10 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
         _map = new HashMap<String, Object>(MAP_MESSAGE_CAPACITY);
     }
 
-    MapMessageImpl(SessionImpl ssn, int transferId, DeliveryProperties deliveryProps, MessageProperties msgProps,
-            ByteBuffer data)
+    MapMessageImpl(SessionImpl ssn, int transferId, String consumerId, DeliveryProperties deliveryProps,
+            MessageProperties msgProps, ByteBuffer data)
     {
-        super(ssn, transferId, deliveryProps, msgProps);
+        super(ssn, transferId, consumerId, deliveryProps, msgProps);
         try
         {
             if (propertyExists(PAYLOAD_NULL_PROPERTY) || data == null)

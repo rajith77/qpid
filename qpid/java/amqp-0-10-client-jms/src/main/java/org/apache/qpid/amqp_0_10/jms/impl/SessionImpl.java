@@ -64,8 +64,11 @@ import org.apache.qpid.client.JmsNotImplementedException;
 import org.apache.qpid.configuration.ClientProperties;
 import org.apache.qpid.transport.ConnectionException;
 import org.apache.qpid.transport.MessageTransfer;
+import org.apache.qpid.transport.RangeSet;
+import org.apache.qpid.transport.RangeSetFactory;
 import org.apache.qpid.transport.SessionException;
 import org.apache.qpid.transport.util.Logger;
+import org.apache.qpid.util.ConditionManager;
 import org.apache.qpid.util.ExceptionHelper;
 import org.apache.qpid.util.MessageFactorySupport;
 
@@ -73,7 +76,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 {
     private static final Logger _logger = Logger.get(SessionImpl.class);
 
-    private static final AtomicInteger _consumerTag = new AtomicInteger();
+    private static final AtomicInteger _consumerId = new AtomicInteger();
 
     private static Timer timer = new Timer("ack-flusher", true);
 
@@ -107,8 +110,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
     }
 
-    private org.apache.qpid.transport.Session _amqpSession;
-
     private final ConnectionImpl _conn;
 
     private final AcknowledgeMode _ackMode;
@@ -120,15 +121,25 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private final Map<String, MessageConsumerImpl> _consumers = new ConcurrentHashMap<String, MessageConsumerImpl>(2);
 
+    private final Map<String, DurableTopicSubscriberImpl> _durableSubs = new ConcurrentHashMap<String, DurableTopicSubscriberImpl>(2);
+
     private final AtomicBoolean _closed = new AtomicBoolean(false);
 
     private final AtomicBoolean _failedOverDirty = new AtomicBoolean(false);
+
+    private final ConditionManager _msgDeliveryInProgress = new ConditionManager(false);
+
+    private final ConditionManager _msgDeliveryStopped = new ConditionManager(true);
+
+    private final AtomicBoolean _closeFromOnMessage = new AtomicBoolean(false);
 
     private final MessageFactory _messageFactory;
 
     private final Map<Integer, MessageTransfer> _replayQueue;
 
     private TimerTask _flushTask = null;
+
+    private org.apache.qpid.transport.Session _amqpSession;
 
     protected SessionImpl(ConnectionImpl conn, int ackMode) throws JMSException
     {
@@ -183,38 +194,45 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         closeImpl(true, true);
     }
 
-    
     /**
-     * @param sendClose  : Whether to send protocol close.
-     * @param unregister : Whether to unregister from the connection.
+     * @param sendClose
+     *            : Whether to send protocol close.
+     * @param unregister
+     *            : Whether to unregister from the connection.
      */
     void closeImpl(boolean sendClose, boolean unregister) throws JMSException
     {
         if (!_closed.get())
         {
             _closed.set(true);
+
+            if (unregister)
+            {
+                _conn.removeSession(this, sendClose);
+            }
+
             cancelTimerTask();
+
+            stopMessageDelivery();
+            _msgDeliveryStopped.wakeUpAndReturn();
+
             for (MessageProducerImpl prod : _producers)
             {
                 prod.closeImpl(sendClose, false);
             }
-            _consumers.clear();
-            
+
             for (MessageConsumerImpl cons : _consumers.values())
             {
                 cons.closeImpl(sendClose, false);
-            }            
+            }
+
+            _consumers.clear();
             _producers.clear();
-            
+
             if (sendClose)
             {
                 getAMQPSession().close();
                 getAMQPSession().sync();
-            }
-            
-            if (unregister)
-            {
-                _conn.removeSession(this);
             }
         }
     }
@@ -229,10 +247,11 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         {
             rollback();
 
-            throw new TransactionRolledBackException("Connection failover has occured with uncommitted transaction activity." +
-                                                     "The transaction was rolled back.");
+            throw new TransactionRolledBackException(
+                    "Connection failover has occured with uncommitted transaction activity."
+                            + "The transaction was rolled back.");
         }
-        
+
         for (MessageConsumerImpl cons : _consumers.values())
         {
             cons.sendMessageAccept(false);
@@ -246,7 +265,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
         catch (SessionException se)
         {
-            closeImpl(false,false);
+            closeImpl(false, false);
             throw ExceptionHelper.toJMSException("Commit failed due to error", se);
         }
     }
@@ -256,6 +275,8 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     {
         checkClosed();
         checkTransactional();
+
+        stopMessageDelivery();
 
         for (MessageConsumerImpl cons : _consumers.values())
         {
@@ -270,7 +291,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
         catch (SessionException se)
         {
-            closeImpl(false,false);
+            closeImpl(false, false);
             throw ExceptionHelper.toJMSException("Rollback failed due to error", se);
         }
 
@@ -293,6 +314,8 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         checkClosed();
         checkNotTransactional();
 
+        stopMessageDelivery();
+
         for (MessageConsumerImpl cons : _consumers.values())
         {
             cons.stopMessageDelivery();
@@ -303,6 +326,56 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             cons.requeueUnackedMessages();
             cons.startMessageDelivery();
         }
+        
+        startMessageDelivery();
+    }
+
+    void messageReceived(MessageImpl m)
+    {
+        if (isClosed())
+        {
+            // drop the message on the floor.
+            return;
+        }
+        _msgDeliveryStopped.waitUntilFalse();
+
+        if (isClosed())
+        {
+            // drop the message on the floor.
+            return;
+        }
+        else
+        {
+
+            _msgDeliveryInProgress.setValueAndNotify(true);
+        }
+        try
+        {
+            MessageConsumerImpl cons = _consumers.get(m.getConsumerId());
+            if (cons != null)
+            {
+                cons.messageReceived(m);
+            }
+            else
+            {
+                releaseMessageAndLogException(m);
+            }
+        }
+        finally
+        {
+            _msgDeliveryInProgress.setValueAndNotify(false);
+            if (_closeFromOnMessage.get())
+            {
+                try
+                {
+                    close();
+                }
+                catch (JMSException e)
+                {
+                    _logger.warn(e, "Error trying to close consumer");
+                }
+            }
+        }
     }
 
     void start() throws JMSException
@@ -311,10 +384,13 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         {
             cons.start();
         }
+        startMessageDelivery();
     }
 
     void stop() throws JMSException
     {
+        stopMessageDelivery();
+
         for (MessageConsumerImpl cons : _consumers.values())
         {
             cons.stop();
@@ -339,34 +415,43 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             _failedOverDirty.set(true);
         }
 
-        for (MessageProducerImpl prod: _producers)
+        stopMessageDelivery();
+
+        for (MessageProducerImpl prod : _producers)
         {
             prod.stopMessageSender();
         }
-        for (MessageConsumerImpl cons: _consumers.values())
+        for (MessageConsumerImpl cons : _consumers.values())
         {
             cons.stopMessageDelivery();
         }
     }
-    
+
     void postFailover() throws JMSException
     {
-        for (MessageConsumerImpl cons: _consumers.values())
+        createProtocolSession();
+        for (MessageConsumerImpl cons : _consumers.values())
         {
-            cons.createSubscription();
+            cons.createSubscription();            
             cons.startMessageDelivery();
         }
-        for (MessageProducerImpl prod: _producers)
+        for (MessageProducerImpl prod : _producers)
         {
             prod.verifyDestinationForProducer();
             prod.startMessageSender();
         }
+
+        startMessageDelivery();
     }
 
     @Override
     public MessageProducer createProducer(Destination dest) throws JMSException
     {
-        MessageProducerImpl prod = new MessageProducerImpl(this, dest);
+        if (!(dest instanceof DestinationImpl))
+        {
+            throw new InvalidDestinationException("Invalid destination class " + dest.getClass().getName());
+        }
+        MessageProducerImpl prod = new MessageProducerImpl(this, (DestinationImpl)dest);
         _producers.add(prod);
         return prod;
     }
@@ -386,9 +471,19 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public MessageConsumer createConsumer(Destination dest, String selector, boolean noLocal) throws JMSException
     {
-        String tag = String.valueOf(_consumerTag.incrementAndGet());
-        MessageConsumerImpl cons = new MessageConsumerImpl(tag, this, dest, selector, noLocal, false, _ackMode);
+        if (!(dest instanceof DestinationImpl))
+        {
+            throw new InvalidDestinationException("Invalid destination class " + dest.getClass().getName());
+        }
+
+        String tag = String.valueOf(_consumerId.incrementAndGet());
+        MessageConsumerImpl cons = new MessageConsumerImpl(tag, this, (DestinationImpl)dest, selector, noLocal, false, _ackMode);
         _consumers.put(tag, cons);
+        
+        if (isStarted())
+        {
+            cons.start();
+        }
 
         return cons;
     }
@@ -396,23 +491,66 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public TopicSubscriber createDurableSubscriber(Topic topic, String name) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return createDurableSubscriber(topic, name, null, false);
     }
 
     @Override
     public TopicSubscriber createDurableSubscriber(Topic topic, String name, String selector, boolean noLocal)
             throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        if (!(topic instanceof TopicImpl))
+        {
+            throw new InvalidDestinationException("Invalid Topic Class" + (topic == null? ": Null" : topic.getClass().getName()));
+        }
+        
+        if ((topic instanceof TemporaryTopic) && ((TemporaryTopicImpl)topic).getSession() != this)
+        {
+            throw new InvalidDestinationException("Cannot use a temporary topic created from a different session");
+        }
+
+        if (_durableSubs.containsKey(name))
+        {
+            DurableTopicSubscriberImpl topicSub = _durableSubs.get(name);
+            
+            if ( topic.equals(topicSub.getTopic()) && 
+                 ( (selector == null && topicSub.getMessageSelector() == null) ||
+                   (selector != null && selector.equals(topicSub.getMessageSelector()))       
+                 )
+               )
+            {
+                throw new IllegalStateException("Already subscribed to topic [" + topic + "] with subscription name " + name
+                    + (selector != null ? " and selector " + selector : ""));
+            }
+            else
+            {
+                topicSub.close();
+            }
+        }
+        
+        String tag = String.valueOf(_consumerId.incrementAndGet());
+        DurableTopicSubscriberImpl topicSub = new DurableTopicSubscriberImpl(name, tag, this, (TopicImpl)topic, selector, noLocal, false, _ackMode);
+        _consumers.put(tag, topicSub);
+        _durableSubs.put(name, topicSub);
+
+        if (isStarted())
+        {
+            topicSub.start();
+        }
+
+        return topicSub;
     }
 
     @Override
-    public void unsubscribe(String arg0) throws JMSException
+    public void unsubscribe(String name) throws JMSException
     {
-        // TODO Auto-generated method stub
-
+        if (_durableSubs.containsKey(name))
+        {
+            _durableSubs.get(name).close();
+        }
+        else
+        {
+            throw new InvalidDestinationException("Invalid subscription name. No subscriptions is associated with this name");
+        }
     }
 
     @Override
@@ -432,8 +570,13 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public TopicPublisher createPublisher(Topic topic) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        if (!(topic instanceof TopicImpl))
+        {
+            throw new InvalidDestinationException("Invalid Topic Class" + topic.getClass().getName());
+        }
+        TopicPublisherImpl prod = new TopicPublisherImpl(this, (TopicImpl)topic);
+        _producers.add(prod);
+        return prod;
     }
 
     @Override
@@ -450,32 +593,55 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             throw new InvalidDestinationException("Invalid Topic Class" + topic.getClass().getName());
         }
 
-        String tag = String.valueOf(_consumerTag.incrementAndGet());
-        TopicSubscriberImpl cons = new TopicSubscriberImpl(tag, this, topic, selector, noLocal, false, _ackMode);
+        String tag = String.valueOf(_consumerId.incrementAndGet());
+        TopicSubscriberImpl cons = new TopicSubscriberImpl(tag, this, (TopicImpl)topic, selector, noLocal, false, _ackMode);
         _consumers.put(tag, cons);
 
+        if (isStarted())
+        {
+            cons.start();
+        }
+        
         return cons;
     }
 
     @Override
     public QueueReceiver createReceiver(Queue queue) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return createReceiver(queue);
     }
 
     @Override
-    public QueueReceiver createReceiver(Queue queue, String messageSelector) throws JMSException
+    public QueueReceiver createReceiver(Queue queue, String selector) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        if (!(queue instanceof QueueImpl))
+        {
+            throw new InvalidDestinationException("Invalid Queue Class" + queue.getClass().getName());
+        }
+
+        String tag = String.valueOf(_consumerId.incrementAndGet());
+        QueueReceiverImpl cons = new QueueReceiverImpl(tag, this, (QueueImpl)queue, selector, false, false, _ackMode);
+        _consumers.put(tag, cons);
+
+        if (isStarted())
+        {
+            cons.start();
+        }
+        
+        return cons;
     }
 
     @Override
     public QueueSender createSender(Queue queue) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        if (!(queue instanceof QueueImpl))
+        {
+            throw new InvalidDestinationException("Invalid Queue Class" + queue.getClass().getName());
+        }
+
+        QueueSenderImpl prod = new QueueSenderImpl(this, (QueueImpl)queue);
+        _producers.add(prod);
+        return prod;
     }
 
     @Override
@@ -606,6 +772,11 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     }
 
+    boolean isClosed()
+    {
+        return _closed.get();
+    }
+
     void addToReplayQueue(MessageTransfer msg)
     {
         _replayQueue.put(msg.getId(), msg);
@@ -644,6 +815,36 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
     }
 
+    private void releaseMessageAndLogException(MessageImpl m)
+    {
+        try
+        {
+            RangeSet range = RangeSetFactory.createRangeSet();
+            range.add(m.getTransferId());
+            _amqpSession.messageRelease(range);
+        }
+        catch (Exception e)
+        {
+            _logger.warn(e, "Error trying to release message for closed consumer");
+        }
+    }
+
+    private void startMessageDelivery()
+    {
+        _msgDeliveryStopped.setValueAndNotify(false);
+    }
+    
+    private void stopMessageDelivery()
+    {
+        _msgDeliveryStopped.setValueAndNotify(true);
+        _msgDeliveryInProgress.waitUntilFalse();
+    }
+
+    private boolean isStarted()
+    {
+        return _conn.isStarted();
+    }
+    
     // --------------- Unsupported Methods -------------
     @Override
     public void run()

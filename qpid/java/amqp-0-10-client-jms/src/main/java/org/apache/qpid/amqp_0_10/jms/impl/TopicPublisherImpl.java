@@ -21,21 +21,45 @@
 package org.apache.qpid.amqp_0_10.jms.impl;
 
 import javax.jms.JMSException;
+import javax.jms.Message;
 import javax.jms.Topic;
-import javax.jms.TopicSubscriber;
+import javax.jms.TopicPublisher;
 
-public class TopicSubscriberImpl extends MessageConsumerImpl implements TopicSubscriber
+public class TopicPublisherImpl extends MessageProducerImpl implements TopicPublisher
 {
 
-    public TopicSubscriberImpl(String consumerId, SessionImpl ssn, TopicImpl topic, String selector, boolean noLocal,
-            boolean browseOnly, AcknowledgeMode ackMode) throws JMSException
+    public TopicPublisherImpl(SessionImpl ssn, TopicImpl topic) throws JMSException
     {
-        super(consumerId, ssn, topic, selector, noLocal, browseOnly, ackMode);
+        super(ssn, topic);
     }
 
     @Override
     public Topic getTopic() throws JMSException
     {
         return (TopicImpl) getDestination();
+    }
+
+    @Override
+    public void publish(Message msg) throws JMSException
+    {
+        send(msg);
+    }
+
+    @Override
+    public void publish(Topic topic, Message msg) throws JMSException
+    {
+        send(topic, msg);
+    }
+
+    @Override
+    public void publish(Message msg, int deliveryMode, int priority, long timeToLive) throws JMSException
+    {
+        send(msg, deliveryMode, priority, timeToLive);
+    }
+
+    @Override
+    public void publish(Topic topic, Message msg, int deliveryMode, int priority, long timeToLive) throws JMSException
+    {
+        send(topic, msg, deliveryMode, priority, timeToLive);
     }
 }

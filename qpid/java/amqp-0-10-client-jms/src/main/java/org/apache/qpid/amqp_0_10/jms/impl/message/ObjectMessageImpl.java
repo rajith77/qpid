@@ -53,10 +53,10 @@ public class ObjectMessageImpl extends MessageImpl implements ObjectMessage, Con
         getMessageProperties().setContentType(JAVA_OBJECT);
     }
 
-    public ObjectMessageImpl(SessionImpl ssn, int transferId, DeliveryProperties deliveryProps,
+    public ObjectMessageImpl(SessionImpl ssn, int transferId, String consumerId, DeliveryProperties deliveryProps,
             MessageProperties msgProps, ByteBuffer data)
     {
-        super(ssn, transferId, deliveryProps, msgProps);
+        super(ssn, transferId, consumerId, deliveryProps, msgProps);
         try
         {
             _serializable = read(data);
