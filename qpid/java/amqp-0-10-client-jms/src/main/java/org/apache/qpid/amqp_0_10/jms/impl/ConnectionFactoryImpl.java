@@ -55,50 +55,66 @@ public class ConnectionFactoryImpl implements ConnectionFactory, QueueConnection
     @Override
     public Connection createConnection() throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return createConnectionImpl(_url);
     }
 
     @Override
     public Connection createConnection(String user, String pass) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        AMQConnectionURL url = getURL(user, pass);
+        url.setUsername(user);
+        url.setPassword(pass);
+        return createConnectionImpl(url);
     }
 
     @Override
     public TopicConnection createTopicConnection() throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return (TopicConnection)createConnectionImpl(_url);
     }
 
     @Override
     public TopicConnection createTopicConnection(String user, String pass) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        AMQConnectionURL url = getURL(user, pass);
+        url.setUsername(user);
+        url.setPassword(pass);
+        return (TopicConnection)createConnectionImpl(url);
     }
 
     @Override
     public QueueConnection createQueueConnection() throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return (QueueConnection)createConnectionImpl(_url);
     }
 
     @Override
     public QueueConnection createQueueConnection(String user, String pass) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        AMQConnectionURL url = getURL(user, pass);
+        url.setUsername(user);
+        url.setPassword(pass);
+        return (QueueConnection)createConnectionImpl(url);
     }
 
-    private Connection createAMQPConnection() throws JMSException
+    private AMQConnectionURL getURL(String user, String pass) throws JMSException
     {
         try
         {
-            return new ConnectionImpl(_url);
+            AMQConnectionURL url = new AMQConnectionURL(_url.getURL());
+            return url;
+        }
+        catch (URLSyntaxException e)
+        {
+            throw ExceptionHelper.toJMSException("Error creating connection", e);
+        }
+    }
+
+    private Connection createConnectionImpl(AMQConnectionURL url) throws JMSException
+    {
+        try
+        {
+            return new ConnectionImpl(url);
         }
         catch (JMSException ex)
         {
@@ -106,7 +122,7 @@ public class ConnectionFactoryImpl implements ConnectionFactory, QueueConnection
             {
                 try
                 {
-                    return new AMQConnection(_url);
+                    return new AMQConnection(url);
                 }
                 catch (AMQException e)
                 {

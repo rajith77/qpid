@@ -651,6 +651,9 @@ public class AddressResolution
 
     static boolean checkAddressPolicy(AddressPolicy policy, CheckMode mode)
     {
+        System.out.println("=====================================");
+        System.out.println("Policy : " + policy);
+        System.out.println("=====================================");
         return policy == AddressPolicy.ALWAYS || (mode == CheckMode.RECEIVER && policy == AddressPolicy.RECEIVER)
                 || (mode == CheckMode.SENDER && policy == AddressPolicy.SENDER);
     }

@@ -23,6 +23,8 @@ package org.apache.qpid.amqp_0_10.jms.impl;
 import java.util.HashMap;
 import java.util.Map;
 
+import javax.jms.JMSException;
+
 import org.apache.qpid.client.AMQConnectionURL;
 import org.apache.qpid.configuration.ClientProperties;
 import org.apache.qpid.jms.BrokerDetails;
@@ -49,17 +51,24 @@ public class ConnectionConfig
         _url = conn.getConnectionURL();
     }
 
-    int getMaxPrefetch()
+    public int getMaxPrefetch()
     {
         return 0;
     }
 
-    PublishMode getPublishMode()
+    public PublishMode getPublishMode()
     {
         return null;
     }
 
-    ConnectionSettings retrieveConnectionSettings(BrokerDetails brokerDetail)
+    public int getDispatcherCount()
+    {
+        //TODO if connection property not null return that else, get the default.
+        return Integer.getInteger(ClientProperties.QPID_DISPATCHER_COUNT,
+                ClientProperties.DEFAULT_DISPATCHER_COUNT);
+    }
+
+    public ConnectionSettings retrieveConnectionSettings(BrokerDetails brokerDetail)
     {
         ConnectionSettings conSettings = brokerDetail.buildConnectionSettings();
 
@@ -69,7 +78,13 @@ public class ConnectionConfig
 
         // Pass client name from connection URL
         Map<String, Object> clientProps = new HashMap<String, Object>();
-        clientProps.put(ConnectionStartProperties.CLIENT_ID_0_10, _conn.getConnectionURL());
+        try
+        {
+            clientProps.put(ConnectionStartProperties.CLIENT_ID_0_10, _conn.getClientID());
+        }
+        catch (JMSException e)
+        {            
+        }
         conSettings.setClientProperties(clientProps);
 
         conSettings.setHeartbeatInterval(getHeartbeatInterval(brokerDetail));

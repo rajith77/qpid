@@ -65,12 +65,12 @@ public class ConditionManager
 
     public void waitUntilFalse()
     {
-        waitImpl(_value, -1);
+        waitImpl(Boolean.FALSE, -1);
     }
 
     public long waitUntilFalse(long timeout) throws ConditionManagerTimeoutException
     {
-        long remaining = waitImpl(_value, timeout);
+        long remaining = waitImpl(Boolean.FALSE, timeout);
         if (_value)
         {
             throw new ConditionManagerTimeoutException("Timed out waiting for condition to become false");
@@ -83,12 +83,12 @@ public class ConditionManager
 
     public void waitUntilTrue()
     {
-        waitImpl(!_value, -1);
+        waitImpl(Boolean.TRUE, -1);
     }
 
     public long waitUntilTrue(long timeout) throws ConditionManagerTimeoutException
     {
-        long remaining = waitImpl(!_value, timeout);
+        long remaining = waitImpl(Boolean.TRUE, timeout);
         if (!_value)
         {
             throw new ConditionManagerTimeoutException("Timed out waiting for condition to become true");
@@ -105,7 +105,7 @@ public class ConditionManager
         {
             long start = 0;
             long elapsed = 0;
-            while (condition && _continue)
+            while ((_value == condition) && _continue)
             {
                 if (timeout > 0)
                 {

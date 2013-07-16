@@ -97,7 +97,7 @@ public class MessageConsumerImpl implements MessageConsumer
         _consumerId = consumerId;
         _capacity = AddressResolution.evaluateCapacity(_session.getConnection().getConfig().getMaxPrefetch(), _dest,
                 CheckMode.RECEIVER);
-        _localQueue = new LinkedBlockingQueue<MessageImpl>(_capacity);
+        _localQueue = new LinkedBlockingQueue<MessageImpl>(_capacity == 0 ? 1 : _capacity);
 
         switch (ackMode)
         {

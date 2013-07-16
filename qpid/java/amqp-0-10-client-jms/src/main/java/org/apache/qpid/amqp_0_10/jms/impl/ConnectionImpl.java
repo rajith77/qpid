@@ -22,6 +22,7 @@ package org.apache.qpid.amqp_0_10.jms.impl;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 import javax.jms.Connection;
 import javax.jms.ConnectionConsumer;
@@ -40,6 +41,10 @@ import javax.jms.Topic;
 import javax.jms.TopicConnection;
 import javax.jms.TopicSession;
 
+import org.apache.qpid.amqp_0_10.jms.MessageFactory;
+import org.apache.qpid.amqp_0_10.jms.impl.dispatch.DispatchManager;
+import org.apache.qpid.amqp_0_10.jms.impl.dispatch.DispatchManagerImpl;
+import org.apache.qpid.amqp_0_10.jms.impl.message.MessageFactorySupport;
 import org.apache.qpid.client.AMQConnectionURL;
 import org.apache.qpid.client.JmsNotImplementedException;
 import org.apache.qpid.client.transport.ClientConnectionDelegate;
@@ -67,6 +72,10 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         UNCONNECTED, STOPPED, STARTED, CLOSED
     }
 
+    private static final AtomicLong CONN_NUMBER_GENERATOR = new AtomicLong(0);
+
+    private final long _connectionNumber;
+
     private final Object _lock = new Object();
 
     private ConditionManager _failoverInProgress = new ConditionManager(false);
@@ -83,8 +92,14 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     private final ConnectionConfig _config;
 
+    private final DispatchManager<org.apache.qpid.transport.Session> _dispatchManager;
+
+    private final MessageFactory _messageFactory;
+
     private String _clientId;
 
+    private ConnectionException _exception;
+    
     private volatile ExceptionListener _exceptionListener;
 
     protected ConnectionImpl(AMQConnectionURL url) throws JMSException
@@ -93,6 +108,9 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         _amqpConnection = new org.apache.qpid.transport.Connection();
         _amqpConnection.addConnectionListener(this);
         _config = new ConnectionConfig(this);
+        _dispatchManager = new DispatchManagerImpl(this);
+        _connectionNumber = CONN_NUMBER_GENERATOR.incrementAndGet();
+        _messageFactory = MessageFactorySupport.getMessageFactory(null);
     }
 
     private void connect(ConnectionSettings conSettings) throws JMSException
@@ -144,7 +162,8 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         {
             if (_state != State.CLOSED)
             {
-                stop();
+                _dispatchManager.shutdown();
+
                 for (SessionImpl session : _sessions.values())
                 {
                     session.closeImpl(true, false);
@@ -195,6 +214,13 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             }
             SessionImpl ssn = new SessionImpl(this, ackMode);
             _sessions.put(ssn.getAMQPSession(), ssn);
+            _dispatchManager.register(ssn.getAMQPSession());
+
+            if (_state == State.STARTED)
+            {
+                ssn.start();
+            }
+
             return ssn;
         }
     }
@@ -251,7 +277,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             {
                 ConnectionSettings conSettings = _config.retrieveConnectionSettings(_url.getBrokerDetails(0));
                 connect(conSettings);
-                _state = State.STARTED;
             }
 
             if (_state == State.STOPPED)
@@ -262,6 +287,8 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 {
                     session.start();
                 }
+
+                _dispatchManager.start();
             }
 
             _lock.notifyAll();
@@ -276,6 +303,9 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             checkClosed();
             if (_state == State.STARTED)
             {
+                _state = State.STOPPED;
+                _dispatchManager.stop();
+
                 for (SessionImpl session : _sessions.values())
                 {
                     session.stop();
@@ -290,27 +320,56 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         }
     }
 
+    public long getConnectionId()
+    {
+        return _connectionNumber;
+    }
+
+    public MessageFactory getMessageFactory()
+    {
+        return _messageFactory;
+    }
+
     // ----------------------------------------
     // ConnectionListener
     // -----------------------------------------
     @Override
     public void opened(org.apache.qpid.transport.Connection connection)
     {
-        // TODO Auto-generated method stub
-
+        // Not used.
     }
 
     @Override
     public void exception(org.apache.qpid.transport.Connection connection, ConnectionException exception)
     {
-        // TODO Auto-generated method stub
-
+        _exception = exception;
     }
 
     @Override
     public void closed(org.apache.qpid.transport.Connection connection)
     {
-        // TODO Auto-generated method stub
+        synchronized (_lock)
+        {
+            if (_state != State.CLOSED)
+            {
+                _dispatchManager.shutdown();
+                for (SessionImpl session : _sessions.values())
+                {
+                    try
+                    {
+                        session.closeImpl(false, false);
+                    }
+                    catch (JMSException e)
+                    {
+                        _logger.warn(e, "Error closing session");
+                    }
+                }
+                _sessions.clear();               
+                _state = State.CLOSED;
+            }
+
+            _lock.notifyAll();
+        }
     }
 
     // -----------------------------------------
@@ -320,7 +379,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         return _amqpConnection;
     }
 
-    void removeSession(SessionImpl ssn, boolean releaseMsgsInDispatchQueue)
+    void removeSession(SessionImpl ssn)
     {
         synchronized (_lock)
         {
@@ -353,7 +412,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         return _failoverInProgress.waitUntilFalse(timeout);
     }
 
-    ConnectionConfig getConfig()
+    public ConnectionConfig getConfig()
     {
         return _config;
     }
@@ -364,34 +423,43 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     @Override
     public void opened(org.apache.qpid.transport.Session session)
     {
-        // TODO Auto-generated method stub
+        // Not used.
     }
 
     @Override
     public void resumed(org.apache.qpid.transport.Session session)
     {
-        // TODO Auto-generated method stub
-
+        // Not used.
     }
 
     @Override
     public void message(org.apache.qpid.transport.Session ssn, MessageTransfer xfr)
     {
-        // TODO Auto-generated method stub
-
+        MessageImpl msg = (MessageImpl)_messageFactory.createMessage(_sessions.get(ssn), xfr);
+        _dispatchManager.dispatch(msg);
     }
 
     @Override
     public void exception(org.apache.qpid.transport.Session session, SessionException exception)
     {
-        // TODO Auto-generated method stub
-
+        SessionImpl ssn = _sessions.get(session);
+        ssn.setException(exception);
+        //TODO notify session exception via ExceptionListener
     }
 
     @Override
     public void closed(org.apache.qpid.transport.Session session)
     {
-        // TODO Auto-generated method stub
+        SessionImpl ssn = _sessions.get(session);
+        try
+        {
+            ssn.closeImpl(false, false);
+        }
+        catch (JMSException e)
+        {
+            _logger.warn(e, "Error closing session");
+        }
+        removeSession(ssn);
     }
 
     // --------------------------------------

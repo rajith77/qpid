@@ -226,6 +226,9 @@ public class ClientProperties
     public static final String QPID_SESSION_REPLAY_QUEUE_CAPACITY = "qpid.session.replay_queue_capacity";
     public static final int DEFAULT_SESSION_REPLAY_QUEUE_CAPACITY = 1024;
 
+    public static final String QPID_DISPATCHER_COUNT = "qpid.con.dispatcher_count";
+    public static final int DEFAULT_DISPATCHER_COUNT = 1;
+
     private ClientProperties()
     {
         //No instances

@@ -38,6 +38,7 @@ import javax.jms.MessageNotReadableException;
 import javax.jms.MessageNotWriteableException;
 
 import org.apache.qpid.amqp_0_10.jms.AmqpMessage;
+import org.apache.qpid.amqp_0_10.jms.impl.dispatch.Dispatchable;
 import org.apache.qpid.client.CustomJMSXProperty;
 import org.apache.qpid.client.message.QpidMessageProperties;
 import org.apache.qpid.configuration.ClientProperties;
@@ -47,7 +48,7 @@ import org.apache.qpid.transport.MessageDeliveryPriority;
 import org.apache.qpid.transport.MessageProperties;
 import org.apache.qpid.transport.ReplyTo;
 
-public abstract class MessageImpl implements AmqpMessage
+public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apache.qpid.transport.Session>
 {
     protected enum Mode
     {
@@ -105,7 +106,7 @@ public abstract class MessageImpl implements AmqpMessage
     private final int _transferId;
 
     private final String _consumerId;
-    
+
     private String _messageID = null;
 
     private Mode _propertyReadWriteMode;
@@ -128,8 +129,10 @@ public abstract class MessageImpl implements AmqpMessage
         _consumerId = null;
     }
 
-    protected MessageImpl(SessionImpl ssn, int transferId, String consumerId, DeliveryProperties deliveryProps, MessageProperties msgProps)
+    protected MessageImpl(SessionImpl ssn, int transferId, String consumerId, DeliveryProperties deliveryProps,
+            MessageProperties msgProps)
     {
+        _ssn = ssn;
         _deliveryProps = deliveryProps;
         _messageProps = msgProps;
         _propertyReadWriteMode = Mode.READABLE;
@@ -139,12 +142,36 @@ public abstract class MessageImpl implements AmqpMessage
     }
 
     @Override
+    public void dispatch()
+    {
+        if (_ssn == null)
+        {
+            throw new IllegalStateException("Invalid operation");
+        }
+        _ssn.messageReceived(this);
+    }
+
+    @Override
+    public org.apache.qpid.transport.Session getKey()
+    {
+        if (_ssn == null)
+        {
+            throw new IllegalStateException("Invalid operation");
+        }
+        return _ssn.getAMQPSession();
+    }
+
+    @Override
     public void acknowledge() throws JMSException
     {
         if (_ssn == null)
         {
             throw new javax.jms.IllegalStateException(
                     "Illegal operation. You could call acknowledge() only on a received message");
+        }
+        else if (_ssn.getAMQPSession().isClosing())
+        {
+            throw new javax.jms.IllegalStateException("Stale message. Failover has occurred and this message is invalid");
         }
         else
         {
@@ -981,7 +1008,7 @@ public abstract class MessageImpl implements AmqpMessage
     {
         return _transferId;
     }
-    
+
     @Override
     public String getConsumerId()
     {

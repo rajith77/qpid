@@ -70,7 +70,6 @@ import org.apache.qpid.transport.SessionException;
 import org.apache.qpid.transport.util.Logger;
 import org.apache.qpid.util.ConditionManager;
 import org.apache.qpid.util.ExceptionHelper;
-import org.apache.qpid.util.MessageFactorySupport;
 
 public class SessionImpl implements Session, QueueSession, TopicSession
 {
@@ -114,7 +113,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private final AcknowledgeMode _ackMode;
 
-    private final long _maxAckDelay = Long.getLong(ClientProperties.QPID_SESSION_MAX_ACK_DELAY,
+    private final long MAX_ACK_DELAY = Long.getLong(ClientProperties.QPID_SESSION_MAX_ACK_DELAY,
             ClientProperties.DEFAULT_SESSION_MAX_ACK_DELAY);
 
     private final List<MessageProducerImpl> _producers = new CopyOnWriteArrayList<MessageProducerImpl>();
@@ -141,20 +140,21 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private org.apache.qpid.transport.Session _amqpSession;
 
+    private SessionException _exception;
+    
     protected SessionImpl(ConnectionImpl conn, int ackMode) throws JMSException
     {
         _conn = conn;
         _ackMode = AcknowledgeMode.getAckMode(ackMode);
         createProtocolSession();
 
-        if (AcknowledgeMode.DUPS_OK == _ackMode && _maxAckDelay > 0)
+        if (AcknowledgeMode.DUPS_OK == _ackMode && MAX_ACK_DELAY > 0)
         {
             _flushTask = new Flusher(this);
-            timer.schedule(_flushTask, new Date(), _maxAckDelay);
+            timer.schedule(_flushTask, new Date(), MAX_ACK_DELAY);
         }
-
-        // Message factory could be a connection property if need be.
-        _messageFactory = MessageFactorySupport.getMessageFactory(null);
+        
+        _messageFactory = _conn.getMessageFactory();
 
         _replayQueue = new ConcurrentHashMap<Integer, MessageTransfer>(Integer.getInteger(
                 ClientProperties.QPID_SESSION_REPLAY_QUEUE_CAPACITY,
@@ -208,7 +208,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
             if (unregister)
             {
-                _conn.removeSession(this, sendClose);
+                _conn.removeSession(this);
             }
 
             cancelTimerTask();
@@ -459,7 +459,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public MessageConsumer createConsumer(Destination dest) throws JMSException
     {
-        return createConsumer(dest, null);
+        return createConsumer(dest, null, false);
     }
 
     @Override
@@ -608,7 +608,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public QueueReceiver createReceiver(Queue queue) throws JMSException
     {
-        return createReceiver(queue);
+        return createReceiver(queue, null);
     }
 
     @Override
@@ -748,7 +748,17 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     {
         if (_closed.get())
         {
-            throw new IllegalStateException("Session is closed");
+            if (_exception == null)
+            {
+                throw new IllegalStateException("Session is closed");
+            }
+            else
+            {
+                IllegalStateException ex = new IllegalStateException("Session is closed");
+                ex.setLinkedException(_exception);
+                ex.initCause(_exception);
+                throw ex;
+            }
         }
     }
 
@@ -782,6 +792,11 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         _replayQueue.put(msg.getId(), msg);
     }
 
+    void setException(SessionException e)
+    {
+        _exception = e;
+    }
+    
     private void flushPendingAcknowledgements() throws JMSException
     {
         for (MessageConsumerImpl consumer : _consumers.values())
