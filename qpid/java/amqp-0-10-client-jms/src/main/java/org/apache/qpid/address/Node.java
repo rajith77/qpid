@@ -50,15 +50,15 @@ public class Node
 
     private final List<Binding> _bindings;
 
-    public Node (String name)
+    public Node(String name, AddressPolicy createPolicy, AddressPolicy assertPolicy, AddressPolicy deletePolicy)
     {
         _name = name;
         _durable = false;
         _type = NodeType.UNDEFINED;
-        _createPolicy = AddressPolicy.NEVER;
-        _assertPolicy = AddressPolicy.NEVER;
-        _deletePolicy = AddressPolicy.NEVER;
-        _autoDelete  = false;
+        _createPolicy = createPolicy;
+        _assertPolicy = assertPolicy;
+        _deletePolicy = deletePolicy;
+        _autoDelete = false;
         _exclusive = false;
         _alternateExchange = null;
         _exchangeType = null;

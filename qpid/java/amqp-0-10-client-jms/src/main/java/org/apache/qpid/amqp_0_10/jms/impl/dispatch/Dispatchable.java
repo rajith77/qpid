@@ -19,6 +19,8 @@ package org.apache.qpid.amqp_0_10.jms.impl.dispatch;
 
 public interface Dispatchable<K>
 {
+    public int getId();
+    
     public void dispatch();
 
     public K getKey();

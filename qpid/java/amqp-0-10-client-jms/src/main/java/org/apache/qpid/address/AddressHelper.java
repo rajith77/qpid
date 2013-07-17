@@ -204,11 +204,15 @@ public class AddressHelper
 
     @SuppressWarnings({ "rawtypes", "unchecked" })
     public Node getNode()
-    {
+    {   
+        AddressPolicy create = getCreate();
+        AddressPolicy xssert = getAssert();
+        AddressPolicy delete = getDelete();
+     
         Node node;
         if (_nodePropAccess == null)
         {
-            node = new Node(_address.getName());
+            node = new Node(_address.getName(), create, xssert, delete);
         }
         else
         {
@@ -218,9 +222,9 @@ public class AddressHelper
             node = new Node(_address.getName(),
                             getNodeType(),
                             getBooleanProperty(_nodePropAccess,DURABLE,false),
-                            getCreate(),
-                            getAssert(),
-                            getDelete(),
+                            create,
+                            xssert,
+                            delete,
                             getBooleanProperty(xDeclareMapAccessor,AUTO_DELETE,false),
                             getBooleanProperty(xDeclareMapAccessor,EXCLUSIVE,false),
                             xDeclareMapAccessor.getString(ALT_EXCHANGE),

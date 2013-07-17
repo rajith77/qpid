@@ -20,7 +20,10 @@
  */
 package org.apache.qpid.amqp_0_10.jms.impl.dispatch;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -62,7 +65,6 @@ public class Dispatcher<K> implements Runnable
         try
         {
             _dispatcherShutdown.setValueAndNotify(false);
-            System.out.println("XXXXXXXXXXXXXXXXX _dispatcherShutdown : " + _dispatcherShutdown.getCurrentValue());
             
             while (_continue.get())
             {
@@ -71,21 +73,22 @@ public class Dispatcher<K> implements Runnable
                     _dispatcherStarted.setValueAndNotify(false);
                     System.out.println("XXXXXXXXXXXXXXXXX Stopped true, so _dispatcherStarted : " + _dispatcherStarted.getCurrentValue());
                 }
+                
                 _dispatcherStarted.waitUntilTrue();
-                if (!_continue.get())
+                
+                if (!_stopped.get())
                 {
-                    System.out.println("XXXXXXXXXXXXXXXXX continue false, so _dispatcherStarted : " + _dispatcherStarted.getCurrentValue());
-                    break;
+                    try
+                    {
+                        System.out.println("XXXXXXXXXXXXXXXXX going take message and dispatch: " + _dispatcherStarted.getCurrentValue());
+                        _dispatchQueue.take().dispatch();                    
+                    }
+                    catch (InterruptedException e)
+                    {
+                        // continue
+                    }
                 }
-                try
-                {
-                    System.out.println("XXXXXXXXXXXXXXXXX Taking message: " + _dispatcherStarted.getCurrentValue());
-                    _dispatchQueue.take().dispatch();                    
-                }
-                catch (InterruptedException e)
-                {
-                    // continue
-                }
+                
             }
         }
         finally
@@ -102,18 +105,21 @@ public class Dispatcher<K> implements Runnable
 
     public void signalDispatcherToShutdown()
     {
+        _stopped.set(true);
         _continue.set(false);
+        _dispatcherStarted.wakeUpAndReturn();
+        interrupt();
     }
 
     public void waitForDispatcherToShutdown()
     {
-        _dispatcherStarted.wakeUpAndReturn();
         _dispatcherShutdown.waitUntilTrue();
     }
 
     public void signalDispatcherToStop()
     {
         _stopped.set(true);
+        interrupt();
     }
 
     public void signalDispatcherToStart()
@@ -144,6 +150,13 @@ public class Dispatcher<K> implements Runnable
     public void drainQueue()
     {
         _dispatchQueue.clear();
+    }
+
+    public void sort()
+    {
+        List<Dispatchable<K>> list = new ArrayList<Dispatchable<K>>(_dispatchQueue.size());
+        _dispatchQueue.drainTo(list);
+        Collections.sort(list, new DispatchableComparator<K>());
     }
 
     public void setThread(Thread thread)

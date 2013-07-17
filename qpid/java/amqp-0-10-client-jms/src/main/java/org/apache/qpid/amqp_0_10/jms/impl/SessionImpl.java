@@ -22,6 +22,7 @@ package org.apache.qpid.amqp_0_10.jms.impl;
 
 import java.io.Serializable;
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +65,7 @@ import org.apache.qpid.client.JmsNotImplementedException;
 import org.apache.qpid.configuration.ClientProperties;
 import org.apache.qpid.transport.ConnectionException;
 import org.apache.qpid.transport.MessageTransfer;
+import org.apache.qpid.transport.Option;
 import org.apache.qpid.transport.RangeSet;
 import org.apache.qpid.transport.RangeSetFactory;
 import org.apache.qpid.transport.SessionException;
@@ -77,7 +79,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private static final AtomicInteger _consumerId = new AtomicInteger();
 
-    private static Timer timer = new Timer("ack-flusher", true);
+    private static final Timer timer = new Timer("ack-flusher", true);
 
     private static class Flusher extends TimerTask
     {
@@ -99,7 +101,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             {
                 try
                 {
-                    ssn.flushPendingAcknowledgements();
+                    ssn.acknowledgeUpTo(Integer.MAX_VALUE, false);
                 }
                 catch (JMSException e)
                 {
@@ -130,8 +132,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private final ConditionManager _msgDeliveryStopped = new ConditionManager(true);
 
-    private final AtomicBoolean _closeFromOnMessage = new AtomicBoolean(false);
-
     private final MessageFactory _messageFactory;
 
     private final Map<Integer, MessageTransfer> _replayQueue;
@@ -141,7 +141,9 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     private org.apache.qpid.transport.Session _amqpSession;
 
     private SessionException _exception;
-    
+
+    private Thread _dispatcherThread;
+
     protected SessionImpl(ConnectionImpl conn, int ackMode) throws JMSException
     {
         _conn = conn;
@@ -153,7 +155,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             _flushTask = new Flusher(this);
             timer.schedule(_flushTask, new Date(), MAX_ACK_DELAY);
         }
-        
+
         _messageFactory = _conn.getMessageFactory();
 
         _replayQueue = new ConcurrentHashMap<Integer, MessageTransfer>(Integer.getInteger(
@@ -214,7 +216,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             cancelTimerTask();
 
             stopMessageDelivery();
-            _msgDeliveryStopped.wakeUpAndReturn();
 
             for (MessageProducerImpl prod : _producers)
             {
@@ -252,10 +253,12 @@ public class SessionImpl implements Session, QueueSession, TopicSession
                             + "The transaction was rolled back.");
         }
 
+        RangeSet rangeSet = RangeSetFactory.createRangeSet();
         for (MessageConsumerImpl cons : _consumers.values())
         {
-            cons.sendMessageAccept(false);
+            cons.getUnackedMessageIds(rangeSet);
         }
+        sendAcknowledgements(rangeSet, false);
 
         try
         {
@@ -265,7 +268,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
         catch (SessionException se)
         {
-            closeImpl(false, false);
             throw ExceptionHelper.toJMSException("Commit failed due to error", se);
         }
     }
@@ -278,9 +280,24 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
         stopMessageDelivery();
 
+        List<MessageImpl> requeueList = new ArrayList<MessageImpl>();
+
         for (MessageConsumerImpl cons : _consumers.values())
         {
+            if (Thread.currentThread() == _dispatcherThread)
+            {
+                cons.setRedeliverCurrentMessage(true);
+            }
+
             cons.stopMessageDelivery();
+            requeueList.addAll(cons.getUnackedMessagesForRequeue());
+
+            MessageImpl currentMsg = cons.getCurrentMessage();
+            if (Thread.currentThread() == _dispatcherThread && currentMsg != null)
+            {
+                currentMsg.setJMSRedelivered(true);
+                requeueList.add(currentMsg);
+            }
         }
 
         try
@@ -300,12 +317,18 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             _failedOverDirty.set(false);
         }
 
+        requeueMessages(requeueList);
+
         for (MessageConsumerImpl cons : _consumers.values())
         {
-            cons.requeueUnackedMessages();
+            if (Thread.currentThread() == _dispatcherThread)
+            {
+                cons.setRedeliverCurrentMessage(false);
+            }
             cons.startMessageDelivery();
         }
 
+        startMessageDelivery();
     }
 
     @Override
@@ -314,19 +337,44 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         checkClosed();
         checkNotTransactional();
 
+        if (!_conn.isStarted())
+        {
+            throw new IllegalStateException("The connection is currently stopped.");
+        }
+
         stopMessageDelivery();
 
-        for (MessageConsumerImpl cons : _consumers.values())
-        {
-            cons.stopMessageDelivery();
-        }
+        List<MessageImpl> requeueList = new ArrayList<MessageImpl>();
 
         for (MessageConsumerImpl cons : _consumers.values())
         {
-            cons.requeueUnackedMessages();
+            if (Thread.currentThread() == _dispatcherThread)
+            {
+                cons.setRedeliverCurrentMessage(true);
+            }
+
+            cons.stopMessageDelivery();
+            requeueList.addAll(cons.getUnackedMessagesForRequeue());
+
+            MessageImpl currentMsg = cons.getCurrentMessage();
+            if (Thread.currentThread() == _dispatcherThread && currentMsg != null)
+            {
+                currentMsg.setJMSRedelivered(true);
+                requeueList.add(currentMsg);
+            }
+        }
+
+        requeueMessages(requeueList);
+
+        for (MessageConsumerImpl cons : _consumers.values())
+        {
+            if (Thread.currentThread() == _dispatcherThread)
+            {
+                cons.setRedeliverCurrentMessage(false);
+            }
             cons.startMessageDelivery();
         }
-        
+
         startMessageDelivery();
     }
 
@@ -344,16 +392,22 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             // drop the message on the floor.
             return;
         }
-        else
-        {
 
-            _msgDeliveryInProgress.setValueAndNotify(true);
+        if (_msgDeliveryStopped.getCurrentValue())
+        {
+            requeueMessage(m);
+            return;
         }
+
         try
         {
+            _msgDeliveryInProgress.setValueAndNotify(true);
+            System.out.println("################# going to deliver to consumer _msgDeliveryInProgress : "
+                    + _msgDeliveryInProgress.getCurrentValue());
             MessageConsumerImpl cons = _consumers.get(m.getConsumerId());
             if (cons != null)
             {
+                _dispatcherThread = Thread.currentThread();
                 cons.messageReceived(m);
             }
             else
@@ -363,18 +417,10 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
         finally
         {
+            _dispatcherThread = null;
             _msgDeliveryInProgress.setValueAndNotify(false);
-            if (_closeFromOnMessage.get())
-            {
-                try
-                {
-                    close();
-                }
-                catch (JMSException e)
-                {
-                    _logger.warn(e, "Error trying to close consumer");
-                }
-            }
+            System.out.println("################# finally _msgDeliveryInProgress : "
+                    + _msgDeliveryInProgress.getCurrentValue());
         }
     }
 
@@ -432,7 +478,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         createProtocolSession();
         for (MessageConsumerImpl cons : _consumers.values())
         {
-            cons.createSubscription();            
+            cons.createSubscription();
             cons.startMessageDelivery();
         }
         for (MessageProducerImpl prod : _producers)
@@ -451,7 +497,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         {
             throw new InvalidDestinationException("Invalid destination class " + dest.getClass().getName());
         }
-        MessageProducerImpl prod = new MessageProducerImpl(this, (DestinationImpl)dest);
+        MessageProducerImpl prod = new MessageProducerImpl(this, (DestinationImpl) dest);
         _producers.add(prod);
         return prod;
     }
@@ -477,9 +523,10 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
 
         String tag = String.valueOf(_consumerId.incrementAndGet());
-        MessageConsumerImpl cons = new MessageConsumerImpl(tag, this, (DestinationImpl)dest, selector, noLocal, false, _ackMode);
+        MessageConsumerImpl cons = new MessageConsumerImpl(tag, this, (DestinationImpl) dest, selector, noLocal, false,
+                _ackMode);
         _consumers.put(tag, cons);
-        
+
         if (isStarted())
         {
             cons.start();
@@ -500,10 +547,11 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     {
         if (!(topic instanceof TopicImpl))
         {
-            throw new InvalidDestinationException("Invalid Topic Class" + (topic == null? ": Null" : topic.getClass().getName()));
+            throw new InvalidDestinationException("Invalid Topic Class"
+                    + (topic == null ? ": Null" : topic.getClass().getName()));
         }
-        
-        if ((topic instanceof TemporaryTopic) && ((TemporaryTopicImpl)topic).getSession() != this)
+
+        if ((topic instanceof TemporaryTopic) && ((TemporaryTopicImpl) topic).getSession() != this)
         {
             throw new InvalidDestinationException("Cannot use a temporary topic created from a different session");
         }
@@ -511,24 +559,23 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         if (_durableSubs.containsKey(name))
         {
             DurableTopicSubscriberImpl topicSub = _durableSubs.get(name);
-            
-            if ( topic.equals(topicSub.getTopic()) && 
-                 ( (selector == null && topicSub.getMessageSelector() == null) ||
-                   (selector != null && selector.equals(topicSub.getMessageSelector()))       
-                 )
-               )
+
+            if (topic.equals(topicSub.getTopic())
+                    && ((selector == null && topicSub.getMessageSelector() == null) || (selector != null && selector
+                            .equals(topicSub.getMessageSelector()))))
             {
-                throw new IllegalStateException("Already subscribed to topic [" + topic + "] with subscription name " + name
-                    + (selector != null ? " and selector " + selector : ""));
+                throw new IllegalStateException("Already subscribed to topic [" + topic + "] with subscription name "
+                        + name + (selector != null ? " and selector " + selector : ""));
             }
             else
             {
                 topicSub.close();
             }
         }
-        
+
         String tag = String.valueOf(_consumerId.incrementAndGet());
-        DurableTopicSubscriberImpl topicSub = new DurableTopicSubscriberImpl(name, tag, this, (TopicImpl)topic, selector, noLocal, false, _ackMode);
+        DurableTopicSubscriberImpl topicSub = new DurableTopicSubscriberImpl(name, tag, this, (TopicImpl) topic,
+                selector, noLocal, false, _ackMode);
         _consumers.put(tag, topicSub);
         _durableSubs.put(name, topicSub);
 
@@ -549,7 +596,8 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
         else
         {
-            throw new InvalidDestinationException("Invalid subscription name. No subscriptions is associated with this name");
+            throw new InvalidDestinationException(
+                    "Invalid subscription name. No subscriptions is associated with this name");
         }
     }
 
@@ -574,7 +622,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         {
             throw new InvalidDestinationException("Invalid Topic Class" + topic.getClass().getName());
         }
-        TopicPublisherImpl prod = new TopicPublisherImpl(this, (TopicImpl)topic);
+        TopicPublisherImpl prod = new TopicPublisherImpl(this, (TopicImpl) topic);
         _producers.add(prod);
         return prod;
     }
@@ -594,14 +642,15 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
 
         String tag = String.valueOf(_consumerId.incrementAndGet());
-        TopicSubscriberImpl cons = new TopicSubscriberImpl(tag, this, (TopicImpl)topic, selector, noLocal, false, _ackMode);
+        TopicSubscriberImpl cons = new TopicSubscriberImpl(tag, this, (TopicImpl) topic, selector, noLocal, false,
+                _ackMode);
         _consumers.put(tag, cons);
 
         if (isStarted())
         {
             cons.start();
         }
-        
+
         return cons;
     }
 
@@ -620,14 +669,14 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
 
         String tag = String.valueOf(_consumerId.incrementAndGet());
-        QueueReceiverImpl cons = new QueueReceiverImpl(tag, this, (QueueImpl)queue, selector, false, false, _ackMode);
+        QueueReceiverImpl cons = new QueueReceiverImpl(tag, this, (QueueImpl) queue, selector, false, false, _ackMode);
         _consumers.put(tag, cons);
 
         if (isStarted())
         {
             cons.start();
         }
-        
+
         return cons;
     }
 
@@ -639,7 +688,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             throw new InvalidDestinationException("Invalid Queue Class" + queue.getClass().getName());
         }
 
-        QueueSenderImpl prod = new QueueSenderImpl(this, (QueueImpl)queue);
+        QueueSenderImpl prod = new QueueSenderImpl(this, (QueueImpl) queue);
         _producers.add(prod);
         return prod;
     }
@@ -739,11 +788,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         return _conn;
     }
 
-    Thread getDispatcherThread()
-    {
-        return null;
-    }
-
     void checkClosed() throws JMSException
     {
         if (_closed.get())
@@ -777,9 +821,14 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         return _amqpSession;
     }
 
-    void acknowledgeMesages()
+    void acknowledgeUpTo(int transferId, boolean sync) throws JMSException
     {
-
+        RangeSet rangeSet = RangeSetFactory.createRangeSet();
+        for (MessageConsumerImpl consumer : _consumers.values())
+        {
+            consumer.getUnackedMessageIds(rangeSet);
+        }
+        sendAcknowledgements(rangeSet, sync);
     }
 
     boolean isClosed()
@@ -796,13 +845,31 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     {
         _exception = e;
     }
-    
-    private void flushPendingAcknowledgements() throws JMSException
+
+    void sendAcknowledgements(RangeSet rangeSet, boolean sync) throws JMSException
     {
-        for (MessageConsumerImpl consumer : _consumers.values())
+        try
         {
-            consumer.sendMessageAccept(true);
+            _amqpSession.messageAccept(rangeSet);
+            if (sync)
+            {
+                _amqpSession.sync();
+            }
         }
+        catch (Exception e)
+        {
+            throw ExceptionHelper.toJMSException("Exception when trying to send message accepts", e);
+        }
+    }
+
+    void requeueMessage(MessageImpl m)
+    {
+        _conn.requeueMessage(this, m);
+    }
+
+    void requeueMessages(List<MessageImpl> list)
+    {
+        _conn.requeueMessages(this, list);
     }
 
     private void checkTransactional() throws JMSException
@@ -836,7 +903,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         {
             RangeSet range = RangeSetFactory.createRangeSet();
             range.add(m.getTransferId());
-            _amqpSession.messageRelease(range);
+            _amqpSession.messageRelease(range, Option.SET_REDELIVERED);
         }
         catch (Exception e)
         {
@@ -847,19 +914,26 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     private void startMessageDelivery()
     {
         _msgDeliveryStopped.setValueAndNotify(false);
+        _conn.startDispatcherForSession(this);
     }
-    
+
     private void stopMessageDelivery()
     {
-        _msgDeliveryStopped.setValueAndNotify(true);
-        _msgDeliveryInProgress.waitUntilFalse();
+        if (Thread.currentThread() != _dispatcherThread)
+        {
+            _conn.stopDispatcherForSession(this);
+
+            _msgDeliveryStopped.setValueAndNotify(true);
+            _msgDeliveryStopped.wakeUpAndReturn();
+            _msgDeliveryInProgress.waitUntilFalse();
+        }
     }
 
     private boolean isStarted()
     {
         return _conn.isStarted();
     }
-    
+
     // --------------- Unsupported Methods -------------
     @Override
     public void run()

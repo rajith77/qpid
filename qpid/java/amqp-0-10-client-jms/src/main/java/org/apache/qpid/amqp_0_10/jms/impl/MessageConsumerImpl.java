@@ -24,6 +24,7 @@ import static org.apache.qpid.transport.Option.BATCH;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -76,16 +77,20 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private final ConditionManager _msgDeliveryStopped = new ConditionManager(true);
 
-    private final AtomicBoolean _closeFromOnMessage = new AtomicBoolean(false);
-
+    private final AtomicBoolean _dontAckCurrentMsg = new AtomicBoolean(false);
+    
     private String _subscriptionQueue;
 
     private volatile MessageListener _msgListener;
 
     private Thread _syncReceiveThread;
 
+    private Thread _dispatcherThread;
+
     private int _unsentCompletions = 0;
 
+    private MessageImpl _currentMsg = null;
+    
     protected MessageConsumerImpl(String consumerId, SessionImpl ssn, DestinationImpl dest, String selector,
             boolean noLocal, boolean browseOnly, AcknowledgeMode ackMode) throws JMSException
     {
@@ -218,12 +223,6 @@ public class MessageConsumerImpl implements MessageConsumer
      */
     void closeImpl(boolean sendClose, boolean unregister) throws JMSException
     {
-        if (Thread.currentThread() == _session.getDispatcherThread() && _msgDeliveryInProgress.getCurrentValue())
-        {
-            _closeFromOnMessage.set(true);
-            return;
-        }
-
         if (!_closed.get())
         {
             _closed.set(true);
@@ -234,8 +233,7 @@ public class MessageConsumerImpl implements MessageConsumer
             }
 
             stopMessageDelivery();
-            _msgDeliveryStopped.wakeUpAndReturn();
-
+            
             if (sendClose)
             {
                 cancelSubscription();
@@ -251,7 +249,9 @@ public class MessageConsumerImpl implements MessageConsumer
     {
         preSyncReceiveCheck();
         _msgDeliveryStopped.waitUntilFalse();
-        return receiveImpl(0);
+        MessageImpl m = receiveImpl(0);
+        System.out.println("Message  " + m);
+        return m;
     }
 
     @Override
@@ -345,6 +345,11 @@ public class MessageConsumerImpl implements MessageConsumer
             releaseMessageAndLogException(m);
             return;
         }
+        else if (_msgDeliveryStopped.getCurrentValue())
+        {
+            // We may have been woken up from the wait, but delivery is still stopped.
+            _session.requeueMessage(m);
+        }
         else
         {
             _msgDeliveryInProgress.setValueAndNotify(true);
@@ -354,7 +359,10 @@ public class MessageConsumerImpl implements MessageConsumer
         {
             if (_msgListener != null)
             {
+                _dispatcherThread = Thread.currentThread();
+                _currentMsg = m;
                 _msgListener.onMessage(m);
+
                 try
                 {
                     if (isPrefetchDisabled())
@@ -382,18 +390,9 @@ public class MessageConsumerImpl implements MessageConsumer
         }
         finally
         {
+            _currentMsg = null;
+            _dispatcherThread = null;
             _msgDeliveryInProgress.setValueAndNotify(false);
-            if (_closeFromOnMessage.get())
-            {
-                try
-                {
-                    close();
-                }
-                catch (JMSException e)
-                {
-                    _logger.warn(e, "Error trying to close consumer");
-                }
-            }
         }
     }
 
@@ -403,7 +402,14 @@ public class MessageConsumerImpl implements MessageConsumer
         switch (_ackMode)
         {
         case AUTO_ACK:
-            sendMessageAccept(m, true);
+            if (_dontAckCurrentMsg.get())
+            {
+                _replayQueue.add(m);
+            }
+            else
+            {
+                sendMessageAccept(m, true);
+            }            
             break;
         case TRANSACTED:
         case CLIENT_ACK:
@@ -454,11 +460,15 @@ public class MessageConsumerImpl implements MessageConsumer
      */
     void stopMessageDelivery()
     {
-        _msgDeliveryStopped.setValueAndNotify(true);
-        waitForInProgressDeliveriesToStop();
+        if (Thread.currentThread() != _dispatcherThread) 
+        {
+            _msgDeliveryStopped.setValueAndNotify(true);
+            _msgDeliveryStopped.wakeUpAndReturn();
+            waitForInProgressDeliveriesToStop();
+        }
     }
 
-    void requeueUnackedMessages() throws JMSException
+    List<MessageImpl> getUnackedMessagesForRequeue() throws JMSException
     {
         ArrayList<MessageImpl> tmp = new ArrayList<MessageImpl>(_localQueue.size());
         _localQueue.drainTo(tmp);
@@ -467,9 +477,9 @@ public class MessageConsumerImpl implements MessageConsumer
         {
             MessageImpl m = _replayQueue.get(i);
             m.getDeliveryProperties().setRedelivered(true);
-            _localQueue.add(m);
+            tmp.add(m);
         }
-        _localQueue.addAll(tmp);
+        return tmp;
     }
 
     void releaseMessages() throws JMSException
@@ -481,7 +491,7 @@ public class MessageConsumerImpl implements MessageConsumer
             {
                 unacked.add(m.getTransferId());
             }
-            _session.getAMQPSession().messageRelease(unacked, Option.REDELIVERED);
+            _session.getAMQPSession().messageRelease(unacked, Option.SET_REDELIVERED);
             _replayQueue.clear();
 
             RangeSet prefetched = RangeSetFactory.createRangeSet();
@@ -535,11 +545,7 @@ public class MessageConsumerImpl implements MessageConsumer
         {
             RangeSet range = RangeSetFactory.createRangeSet();
             range.add(m.getTransferId());
-            _session.getAMQPSession().messageAccept(range);
-            if (sync)
-            {
-                _session.getAMQPSession().sync();
-            }
+            _session.sendAcknowledgements(range, sync);
         }
         catch (Exception e)
         {
@@ -551,22 +557,50 @@ public class MessageConsumerImpl implements MessageConsumer
     {
         try
         {
-            RangeSet range = RangeSetFactory.createRangeSet();
-            for (MessageImpl m : _replayQueue)
-            {
-                range.add(m.getTransferId());
-            }
-            _session.getAMQPSession().messageAccept(range);
-            if (sync)
-            {
-                _session.getAMQPSession().sync();
-            }
-            _replayQueue.clear();
+            RangeSet rangeSet = RangeSetFactory.createRangeSet();
+            getUnackedMessageIds(rangeSet);
+            _session.sendAcknowledgements(rangeSet, sync);
         }
         catch (Exception e)
         {
             throw ExceptionHelper.toJMSException("Exception when trying to send message accepts", e);
         }
+    }
+
+    void getUnackedMessageIds(final RangeSet range) throws JMSException
+    {
+        getUnackedMessageIds(range, Integer.MAX_VALUE);
+    }
+
+    void getUnackedMessageIds(final RangeSet range, int threshold) throws JMSException
+    {
+        try
+        {
+            Iterator<MessageImpl> it = _replayQueue.iterator();
+            while (it.hasNext())
+            {
+                MessageImpl m = it.next();
+                if (m.getTransferId() <= threshold)
+                {
+                    range.add(m.getTransferId());
+                    it.remove();
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            throw ExceptionHelper.toJMSException("Exception when trying to send message accepts", e);
+        }
+    }
+
+    void setRedeliverCurrentMessage(boolean b)
+    {
+        _dontAckCurrentMsg.set(b);
+    }
+    
+    MessageImpl getCurrentMessage()
+    {
+        return _currentMsg;
     }
 
     protected SessionImpl getSession()

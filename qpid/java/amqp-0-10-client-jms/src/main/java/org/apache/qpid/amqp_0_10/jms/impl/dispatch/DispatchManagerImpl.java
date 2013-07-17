@@ -28,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.apache.qpid.amqp_0_10.jms.impl.ConnectionImpl;
 import org.apache.qpid.thread.Threading;
 import org.apache.qpid.transport.Session;
+import org.apache.qpid.transport.util.Logger;
 
 /**
  * Bare bones implementation of the DispatcherManager. A more intelligent and
@@ -36,6 +37,8 @@ import org.apache.qpid.transport.Session;
  */
 public class DispatchManagerImpl implements DispatchManager<Session>
 {
+    private static final Logger _logger = Logger.get(DispatchManagerImpl.class);
+    
     private final int _dispatcherCount;
 
     private final ConnectionImpl _conn;
@@ -73,12 +76,43 @@ public class DispatchManagerImpl implements DispatchManager<Session>
         }
     }
 
+    /**
+     * Pre Condition : Message delivery for this session should be stopped before
+     *                 invoking this method.
+     */
     @Override
-    public void dispatch(Dispatchable<Session> disp) throws NullPointerException
+    public void requeue(Session key, Dispatchable<Session> dispatchable)
     {
-        _dispatcherMap.get(disp).add(disp);
+        Dispatcher<Session> dispatcher = _dispatcherMap.get(key);
+        if (dispatcher != null)
+        {
+            dispatcher.add(dispatchable);
+        }
+        else
+        {
+            _logger.warn("The session has been closed. Unable to requeue");
+        }
     }
 
+    @Override
+    public void sortDispatchQueue(Session key)
+    {
+        _dispatcherMap.get(key).sort();
+    }
+    
+    @Override
+    public void dispatch(Dispatchable<Session> dispatchable) throws NullPointerException
+    {
+        _dispatcherMap.get(dispatchable.getKey()).add(dispatchable);
+    }
+
+    @Override
+    public void startDispatcher(Session key)
+    {
+        Dispatcher<Session> dispatcher = _dispatcherMap.get(key);
+        dispatcher.signalDispatcherToStart();
+    }
+    
     @Override
     public void start()
     {
@@ -88,6 +122,15 @@ public class DispatchManagerImpl implements DispatchManager<Session>
         }
     }
 
+    @Override
+    public void stopDispatcher(Session key)
+    {
+        Dispatcher<Session> dispatcher = _dispatcherMap.get(key);
+        dispatcher.signalDispatcherToStop();
+        dispatcher.interrupt();
+        dispatcher.waitForDispatcherToStop();
+    }
+    
     @Override
     public void stop()
     {

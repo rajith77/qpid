@@ -20,14 +20,23 @@
  */
 package org.apache.qpid.amqp_0_10.jms.impl.dispatch;
 
+
 public interface DispatchManager<K>
 {
     public void register(K key);
 
     public void unregister(K key);
 
-    public void dispatch(Dispatchable<K> disp);
+    public void dispatch(Dispatchable<K> dispatchable);
 
+    public void requeue(K key, Dispatchable<K> dispatchable);
+    
+    public void sortDispatchQueue(K key);
+    
+    public void stopDispatcher(K key);
+
+    public void startDispatcher(K key);
+    
     public void start();
 
     public void stop();

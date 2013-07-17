@@ -99,13 +99,18 @@ public class ConditionManager
         }
     }
 
-    long waitImpl(boolean condition, long timeout)
+    long waitImpl(boolean expected, long timeout)
     {
+        if (_value == expected)
+        {
+            return timeout;
+        }
+
         synchronized (_lock)
         {
             long start = 0;
             long elapsed = 0;
-            while ((_value == condition) && _continue)
+            while ((_value != expected) && _continue)
             {
                 if (timeout > 0)
                 {

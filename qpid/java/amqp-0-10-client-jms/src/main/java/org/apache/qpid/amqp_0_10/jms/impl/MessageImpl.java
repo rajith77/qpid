@@ -162,6 +162,12 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
     }
 
     @Override
+    public int getId()
+    {
+        return _transferId;
+    }
+
+    @Override
     public void acknowledge() throws JMSException
     {
         if (_ssn == null)
@@ -171,11 +177,12 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
         }
         else if (_ssn.getAMQPSession().isClosing())
         {
-            throw new javax.jms.IllegalStateException("Stale message. Failover has occurred and this message is invalid");
+            throw new javax.jms.IllegalStateException(
+                    "Stale message. Failover has occurred and this message is invalid");
         }
         else
         {
-            _ssn.acknowledgeMesages();
+            _ssn.acknowledgeUpTo(getTransferId(), true);
         }
     }
 

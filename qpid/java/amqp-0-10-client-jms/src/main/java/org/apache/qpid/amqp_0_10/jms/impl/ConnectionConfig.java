@@ -53,7 +53,7 @@ public class ConnectionConfig
 
     public int getMaxPrefetch()
     {
-        return 0;
+        return Integer.parseInt(ClientProperties.MAX_PREFETCH_DEFAULT);
     }
 
     public PublishMode getPublishMode()
