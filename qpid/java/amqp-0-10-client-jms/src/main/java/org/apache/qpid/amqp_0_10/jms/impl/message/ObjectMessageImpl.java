@@ -113,28 +113,27 @@ public class ObjectMessageImpl extends MessageImpl implements ObjectMessage, Con
     }
 
     @Override
-    protected void isContentReadable() throws JMSException
+    public Serializable getObject() throws JMSException
     {
-        super.isContentReadable();
         if (_exception != null)
         {
             throw _exception;
         }
-    }
-
-    @Override
-    public Serializable getObject() throws JMSException
-    {
-        isContentReadable();
         return _serializable;
     }
 
     @Override
     public void setObject(Serializable serializable) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         clearBody();
         _serializable = serializable;
+    }
+
+    @Override
+    protected void bodyToString(StringBuffer buf) throws JMSException
+    {
+        buf.append("Body:{" + _serializable + "}");
     }
 
     private Serializable read(final ByteBuffer data) throws IOException, ClassNotFoundException

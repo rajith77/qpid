@@ -1,5 +1,4 @@
 /*
- *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -16,32 +15,66 @@
  * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
- *
  */
 package org.apache.qpid.amqp_0_10.jms.impl;
 
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import javax.jms.IllegalStateException;
 import javax.jms.JMSException;
-import javax.jms.TemporaryTopic;
 
-public class TemporaryTopicImpl extends TopicImpl implements TemporaryDestination, TemporaryTopic
+public class TemporaryQueueImpl extends QueueImpl implements TemporaryQueue
 {
+    private final String _name;
+
     private final SessionImpl _session;
 
     private AtomicBoolean _deleted = new AtomicBoolean(false);
 
-    public TemporaryTopicImpl(SessionImpl session) throws JMSException
+    private final Set<MessageConsumerImpl> _consumers = Collections.synchronizedSet(new HashSet<MessageConsumerImpl>());
+
+    public TemporaryQueueImpl(SessionImpl session) throws JMSException
     {
-        super("amq.direct/Qpid_Temp_Topic_" + UUID.randomUUID());
+        super("Qpid_Temp_Queue_" + UUID.randomUUID() + ";{create:always}");
+        _name = getAddress().getName();
         _session = session;
     }
 
     @Override
     public void delete() throws JMSException
     {
+        if (!_deleted.get())
+        {
+            if (_consumers.isEmpty())
+            {
+                deleteQueue(true);
+            }
+            else
+            {
+                throw new IllegalStateException("Cannot delete destination as it has consumers");
+            }
+        }
+    }
+
+    @Override
+    public void deleteQueue(boolean unregister) throws JMSException
+    {
         _deleted.set(true);
+        if (unregister)
+        {
+            _session.removeTempQueue(this);
+        }
+        _session.getAMQPSession().queueDelete(_name);
+    }
+
+    @Override
+    public String getQueueName()
+    {
+        return _name;
     }
 
     @Override
@@ -54,5 +87,17 @@ public class TemporaryTopicImpl extends TopicImpl implements TemporaryDestinatio
     public SessionImpl getSession()
     {
         return _session;
+    }
+
+    @Override
+    public void addConsumer(MessageConsumerImpl cons)
+    {
+        _consumers.add(cons);
+    }
+
+    @Override
+    public void removeConsumer(MessageConsumerImpl cons)
+    {
+        _consumers.remove(cons);
     }
 }

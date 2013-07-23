@@ -77,8 +77,8 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private final ConditionManager _msgDeliveryStopped = new ConditionManager(true);
 
-    private final AtomicBoolean _dontAckCurrentMsg = new AtomicBoolean(false);
-    
+    private final AtomicBoolean _redeliverCurrentMsg = new AtomicBoolean(false);
+
     private String _subscriptionQueue;
 
     private volatile MessageListener _msgListener;
@@ -90,9 +90,15 @@ public class MessageConsumerImpl implements MessageConsumer
     private int _unsentCompletions = 0;
 
     private MessageImpl _currentMsg = null;
-    
+
     protected MessageConsumerImpl(String consumerId, SessionImpl ssn, DestinationImpl dest, String selector,
             boolean noLocal, boolean browseOnly, AcknowledgeMode ackMode) throws JMSException
+    {
+        this(consumerId, ssn, dest, selector, noLocal, browseOnly, ackMode, null);
+    }
+
+    protected MessageConsumerImpl(String consumerId, SessionImpl ssn, DestinationImpl dest, String selector,
+            boolean noLocal, boolean browseOnly, AcknowledgeMode ackMode, String subscriptionQueue) throws JMSException
     {
         _session = ssn;
         _dest = dest;
@@ -100,6 +106,7 @@ public class MessageConsumerImpl implements MessageConsumer
         _selector = selector;
         _noLocal = noLocal;
         _consumerId = consumerId;
+        _subscriptionQueue = subscriptionQueue;
         _capacity = AddressResolution.evaluateCapacity(_session.getConnection().getConfig().getMaxPrefetch(), _dest,
                 CheckMode.RECEIVER);
         _localQueue = new LinkedBlockingQueue<MessageImpl>(_capacity == 0 ? 1 : _capacity);
@@ -233,13 +240,10 @@ public class MessageConsumerImpl implements MessageConsumer
             }
 
             stopMessageDelivery();
-            
+
             if (sendClose)
             {
-                cancelSubscription();
-                releaseMessages();
-                AddressResolution.cleanupForConsumer(_session, _dest, _subscriptionQueue);
-                _session.getAMQPSession().sync();
+                closeConsumer();
             }
         }
     }
@@ -250,7 +254,6 @@ public class MessageConsumerImpl implements MessageConsumer
         preSyncReceiveCheck();
         _msgDeliveryStopped.waitUntilFalse();
         MessageImpl m = receiveImpl(0);
-        System.out.println("Message  " + m);
         return m;
     }
 
@@ -262,9 +265,11 @@ public class MessageConsumerImpl implements MessageConsumer
         try
         {
             remaining = _msgDeliveryStopped.waitUntilFalse(remaining);
+            System.out.println("receive xxxxxxxxxx  timeout : " + timeout);
         }
         catch (ConditionManagerTimeoutException e)
         {
+            System.out.println("receive xxxxxxxxxx  ConditionManagerTimeoutException : " + e);
             // Time out, return null.
             return null;
         }
@@ -280,6 +285,12 @@ public class MessageConsumerImpl implements MessageConsumer
             return null;
         }
         return receiveImpl(-1L);
+    }
+
+    @Override
+    public String toString()
+    {
+        return "Consumer ID: " + _consumerId + ", Dest: " + _dest.getAddress();
     }
 
     MessageImpl receiveImpl(long timeout) throws JMSException
@@ -302,6 +313,7 @@ public class MessageConsumerImpl implements MessageConsumer
                 if (timeout > 0)
                 {
                     m = _localQueue.poll(timeout, TimeUnit.MILLISECONDS);
+                    System.out.println("receive message xxxxxxxxxx  timeout : " + timeout + " msg : " + m);
                 }
                 else if (timeout < 0)
                 {
@@ -332,6 +344,7 @@ public class MessageConsumerImpl implements MessageConsumer
 
     void messageReceived(MessageImpl m)
     {
+        System.out.println("ConsumerImpl.messageReceived xxxx ");
         if (isClosed())
         {
             releaseMessageAndLogException(m);
@@ -347,7 +360,8 @@ public class MessageConsumerImpl implements MessageConsumer
         }
         else if (_msgDeliveryStopped.getCurrentValue())
         {
-            // We may have been woken up from the wait, but delivery is still stopped.
+            // We may have been woken up from the wait, but delivery is still
+            // stopped.
             _session.requeueMessage(m);
         }
         else
@@ -380,6 +394,7 @@ public class MessageConsumerImpl implements MessageConsumer
             {
                 try
                 {
+                    System.out.println("xxxxxxx Adding message to queue " + m);
                     _localQueue.put(m);
                 }
                 catch (InterruptedException e)
@@ -402,14 +417,10 @@ public class MessageConsumerImpl implements MessageConsumer
         switch (_ackMode)
         {
         case AUTO_ACK:
-            if (_dontAckCurrentMsg.get())
-            {
-                _replayQueue.add(m);
-            }
-            else
+            if (!_redeliverCurrentMsg.get())
             {
                 sendMessageAccept(m, true);
-            }            
+            }
             break;
         case TRANSACTED:
         case CLIENT_ACK:
@@ -460,7 +471,7 @@ public class MessageConsumerImpl implements MessageConsumer
      */
     void stopMessageDelivery()
     {
-        if (Thread.currentThread() != _dispatcherThread) 
+        if (Thread.currentThread() != _dispatcherThread)
         {
             _msgDeliveryStopped.setValueAndNotify(true);
             _msgDeliveryStopped.wakeUpAndReturn();
@@ -470,15 +481,15 @@ public class MessageConsumerImpl implements MessageConsumer
 
     List<MessageImpl> getUnackedMessagesForRequeue() throws JMSException
     {
-        ArrayList<MessageImpl> tmp = new ArrayList<MessageImpl>(_localQueue.size());
-        _localQueue.drainTo(tmp);
-
-        for (int i = _replayQueue.size() - 1; i >= 0; i--)
+        ArrayList<MessageImpl> tmp = new ArrayList<MessageImpl>(_localQueue.size() + _replayQueue.size());
+        for (Iterator<MessageImpl> it = _replayQueue.iterator(); it.hasNext();)
         {
-            MessageImpl m = _replayQueue.get(i);
-            m.getDeliveryProperties().setRedelivered(true);
+            MessageImpl m = it.next();
+            m.setJMSRedelivered(true);
             tmp.add(m);
+            it.remove();
         }
+        _localQueue.drainTo(tmp);
         return tmp;
     }
 
@@ -491,8 +502,12 @@ public class MessageConsumerImpl implements MessageConsumer
             {
                 unacked.add(m.getTransferId());
             }
-            _session.getAMQPSession().messageRelease(unacked, Option.SET_REDELIVERED);
             _replayQueue.clear();
+
+            if (unacked.size() > 0)
+            {
+                _session.getAMQPSession().messageRelease(unacked, Option.SET_REDELIVERED);
+            }
 
             RangeSet prefetched = RangeSetFactory.createRangeSet();
             for (MessageImpl m : _localQueue)
@@ -500,7 +515,11 @@ public class MessageConsumerImpl implements MessageConsumer
                 prefetched.add(m.getTransferId());
             }
             _localQueue.clear();
-            _session.getAMQPSession().messageRelease(prefetched);
+
+            if (prefetched.size() > 0)
+            {
+                _session.getAMQPSession().messageRelease(prefetched);
+            }
         }
         catch (Exception e)
         {
@@ -557,9 +576,12 @@ public class MessageConsumerImpl implements MessageConsumer
     {
         try
         {
-            RangeSet rangeSet = RangeSetFactory.createRangeSet();
-            getUnackedMessageIds(rangeSet);
-            _session.sendAcknowledgements(rangeSet, sync);
+            if (_replayQueue.size() > 0)
+            {
+                RangeSet rangeSet = RangeSetFactory.createRangeSet();
+                getUnackedMessageIds(rangeSet);
+                _session.sendAcknowledgements(rangeSet, sync);
+            }
         }
         catch (Exception e)
         {
@@ -595,12 +617,23 @@ public class MessageConsumerImpl implements MessageConsumer
 
     void setRedeliverCurrentMessage(boolean b)
     {
-        _dontAckCurrentMsg.set(b);
+        _redeliverCurrentMsg.set(b);
     }
-    
+
     MessageImpl getCurrentMessage()
     {
         return _currentMsg;
+    }
+
+    void clearLocalAndReplayQueue()
+    {
+        _localQueue.clear();
+        _replayQueue.clear();
+    }
+    
+    boolean isClosed()
+    {
+        return _closed.get();
     }
 
     protected SessionImpl getSession()
@@ -649,6 +682,26 @@ public class MessageConsumerImpl implements MessageConsumer
         }
     }
 
+    protected void closeConsumer() throws JMSException
+    {
+        cancelSubscription();
+        releaseMessages();
+        AddressResolution.cleanupForConsumer(_session, _dest, _subscriptionQueue);
+        _session.getAMQPSession().sync();
+    }
+
+    protected void cancelSubscription() throws JMSException
+    {
+        try
+        {
+            _session.getAMQPSession().messageCancel(_consumerId);
+        }
+        catch (Exception e)
+        {
+            throw ExceptionHelper.toJMSException("Error cancelling subscription", e);
+        }
+    }
+
     private void setMessageCredit(int credit) throws JMSException
     {
         try
@@ -687,18 +740,6 @@ public class MessageConsumerImpl implements MessageConsumer
         _msgDeliveryInProgress.waitUntilFalse();
     }
 
-    private void cancelSubscription() throws JMSException
-    {
-        try
-        {
-            _session.getAMQPSession().messageCancel(_consumerId);
-        }
-        catch (Exception e)
-        {
-            throw ExceptionHelper.toJMSException("Error cancelling subscription", e);
-        }
-    }
-
     private void sendMessageFlush() throws JMSException
     {
         try
@@ -722,11 +763,6 @@ public class MessageConsumerImpl implements MessageConsumer
         {
             throw ExceptionHelper.toJMSException("Error waiting for command completion", e);
         }
-    }
-
-    private boolean isClosed()
-    {
-        return _closed.get() || _session.isClosed();
     }
 
     private void releaseMessageAndLogException(MessageImpl m)
@@ -756,7 +792,7 @@ public class MessageConsumerImpl implements MessageConsumer
         {
             throw new IllegalStateException("Consumer is closed");
         }
-        _session.checkClosed();
+        _session.checkPreConditions();
     }
 
     private boolean isMessageListener()

@@ -20,12 +20,14 @@
  */
 package org.apache.qpid.amqp_0_10.jms.impl;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-import javax.jms.Connection;
 import javax.jms.ConnectionConsumer;
 import javax.jms.ConnectionMetaData;
 import javax.jms.Destination;
@@ -42,10 +44,13 @@ import javax.jms.Topic;
 import javax.jms.TopicConnection;
 import javax.jms.TopicSession;
 
+import org.apache.qpid.amqp_0_10.jms.Connection;
+import org.apache.qpid.amqp_0_10.jms.FailoverManager;
+import org.apache.qpid.amqp_0_10.jms.FailoverUnsuccessfulException;
 import org.apache.qpid.amqp_0_10.jms.MessageFactory;
 import org.apache.qpid.amqp_0_10.jms.impl.dispatch.DispatchManager;
 import org.apache.qpid.amqp_0_10.jms.impl.dispatch.DispatchManagerImpl;
-import org.apache.qpid.amqp_0_10.jms.impl.dispatch.Dispatchable;
+import org.apache.qpid.amqp_0_10.jms.impl.failover.FailoverManagerSupport;
 import org.apache.qpid.amqp_0_10.jms.impl.message.MessageFactorySupport;
 import org.apache.qpid.client.AMQConnectionURL;
 import org.apache.qpid.client.JmsNotImplementedException;
@@ -74,6 +79,11 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         UNCONNECTED, STOPPED, STARTED, CLOSED
     }
 
+    private static enum FailoverStatus
+    {
+        SUCCESSFUL, PRE_FAILOVER_FAILED, RECONNECTION_FAILED, POST_FAILOVER_FAILED
+    }
+
     private static final AtomicLong CONN_NUMBER_GENERATOR = new AtomicLong(0);
 
     private final long _connectionNumber;
@@ -86,11 +96,13 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     private final Map<org.apache.qpid.transport.Session, SessionImpl> _sessions = new ConcurrentHashMap<org.apache.qpid.transport.Session, SessionImpl>();
 
+    private final List<TemporaryQueue> _tempQueues = new ArrayList<TemporaryQueue>();
+
     private volatile State _state = State.UNCONNECTED;
 
-    private final AMQConnectionURL _url;
-
     private final ConnectionMetaDataImpl _metaData = new ConnectionMetaDataImpl();
+
+    private final Collection<CloseTask> _closeTasks = new ArrayList<CloseTask>();
 
     private final ConnectionConfig _config;
 
@@ -98,29 +110,31 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     private final MessageFactory _messageFactory;
 
-    private String _clientId;
+    private final FailoverManager _failoverManager;
 
-    private ConnectionException _exception;
+    private String _clientId;
 
     private volatile ExceptionListener _exceptionListener;
 
     protected ConnectionImpl(AMQConnectionURL url) throws JMSException
     {
-        _url = url;
+        _config = new ConnectionConfig(this, url);
+        _clientId = url.getClientName();
         _amqpConnection = new org.apache.qpid.transport.Connection();
         _amqpConnection.addConnectionListener(this);
-        _config = new ConnectionConfig(this);
         _dispatchManager = new DispatchManagerImpl(this);
         _connectionNumber = CONN_NUMBER_GENERATOR.incrementAndGet();
         _messageFactory = MessageFactorySupport.getMessageFactory(null);
+        _failoverManager = FailoverManagerSupport.getFailoverManager(null);
+        _failoverManager.init(this);
     }
 
-    private void connect(ConnectionSettings conSettings) throws JMSException
+    public void connect(ConnectionSettings conSettings) throws JMSException
     {
         if (_logger.isDebugEnabled())
         {
             _logger.debug("Attempting connection to host: " + conSettings.getHost() + " port: " + conSettings.getPort()
-                    + " vhost: " + _url.getVirtualHost() + " username: " + conSettings.getUsername());
+                    + " vhost: " + conSettings.getVhost() + " username: " + conSettings.getUsername());
         }
 
         synchronized (_lock)
@@ -131,7 +145,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 try
                 {
 
-                    _amqpConnection.setConnectionDelegate(new ClientConnectionDelegate(conSettings, _url));
+                    _amqpConnection.setConnectionDelegate(new ClientConnectionDelegate(conSettings, _config.getURL()));
                     _amqpConnection.connect(conSettings);
                 }
                 catch (ProtocolVersionException pe)
@@ -160,27 +174,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     @Override
     public void close() throws JMSException
     {
-        synchronized (_lock)
-        {
-            if (_state != State.CLOSED)
-            {
-                _state = State.CLOSED;
-                _dispatchManager.shutdown();
-
-                for (SessionImpl session : _sessions.values())
-                {
-                    session.closeImpl(true, false);
-                }
-                _sessions.clear();
-
-                if (_amqpConnection != null && _state != State.UNCONNECTED)
-                {
-                    _amqpConnection.close();
-                }
-            }
-
-            _lock.notifyAll();
-        }
+        closeImpl(true);
     }
 
     @Override
@@ -211,8 +205,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         {
             if (_state == State.UNCONNECTED)
             {
-                ConnectionSettings conSettings = _config.retrieveConnectionSettings(_url.getBrokerDetails(0));
-                connect(conSettings);
+                _failoverManager.connect();
             }
             SessionImpl ssn = new SessionImpl(this, ackMode);
             _sessions.put(ssn.getAMQPSession(), ssn);
@@ -227,20 +220,17 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         }
     }
 
-    AMQConnectionURL getConnectionURL()
-    {
-        return _url;
-    }
-
     @Override
     public String getClientID() throws JMSException
     {
+        checkClosed();
         return _clientId;
     }
 
     @Override
     public ExceptionListener getExceptionListener() throws JMSException
     {
+        checkClosed();
         return _exceptionListener;
     }
 
@@ -265,6 +255,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     @Override
     public void setExceptionListener(ExceptionListener listener) throws JMSException
     {
+        checkClosed();
         _exceptionListener = listener;
     }
 
@@ -277,8 +268,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
             if (_state == State.UNCONNECTED)
             {
-                ConnectionSettings conSettings = _config.retrieveConnectionSettings(_url.getBrokerDetails(0));
-                connect(conSettings);
+                _failoverManager.connect();
             }
 
             if (_state == State.STOPPED)
@@ -344,11 +334,94 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     @Override
     public void exception(org.apache.qpid.transport.Connection connection, ConnectionException exception)
     {
-        _exception = exception;
+        _logger.warn("Connection exception received!", exception);
     }
 
     @Override
     public void closed(org.apache.qpid.transport.Connection connection)
+    {
+        _failoverInProgress.waitUntilFalse();
+        _failoverInProgress.setValueAndNotify(true);
+        FailoverStatus status = FailoverStatus.SUCCESSFUL;
+        JMSException closedException = null;
+        synchronized (_lock)
+        {
+            try
+            {
+                _logger.info("Executing pre failover routine");
+                preFailover();
+            }
+            catch (JMSException e)
+            {
+                _logger.warn("Pre failover failed. Aborting failover", e);
+                closedException = ExceptionHelper.toJMSException("Pre failover failed. Aborting failover", e);
+                status = FailoverStatus.PRE_FAILOVER_FAILED;
+            }
+
+            try
+            {
+
+                _failoverManager.connect();
+            }
+            catch (FailoverUnsuccessfulException e)
+            {
+                _logger.warn("All attempts at reconnection failed. Aborting failover", e);
+                closedException = ExceptionHelper.toJMSException(
+                        "All attempts at reconnection failed. Aborting failover", e);
+                status = FailoverStatus.RECONNECTION_FAILED;
+            }
+
+            try
+            {
+                _logger.info("Reconnection succesfull, Executing post failover routine");
+                postFailover();
+            }
+            catch (JMSException e)
+            {
+                _logger.warn("Post failover failed. Closing the connection", e);
+                closedException = ExceptionHelper.toJMSException("Post failover failed. Closing the connection", e);
+                status = FailoverStatus.POST_FAILOVER_FAILED;
+            }
+
+            _lock.notifyAll();
+        }
+
+        try
+        {
+            switch (status)
+            {
+            case PRE_FAILOVER_FAILED:
+            case RECONNECTION_FAILED:
+            case POST_FAILOVER_FAILED:
+
+                try
+                {
+                    closeImpl(status == FailoverStatus.POST_FAILOVER_FAILED);
+                }
+                catch (JMSException e)
+                {
+                    _logger.warn("Connection close failed", e);
+                }
+                if (_exceptionListener != null)
+                {
+                    _exceptionListener.onException(closedException);
+                }
+                break;
+
+            default:
+                _logger.info("Failover succesfull. Connection Ready to be used");
+                break;
+            }
+        }
+        finally
+        {
+            _failoverInProgress.setValueAndNotify(false);
+        }
+    }
+
+    // -----------------------------------------
+
+    void closeImpl(boolean sendClose) throws JMSException
     {
         synchronized (_lock)
         {
@@ -356,25 +429,55 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             {
                 _state = State.CLOSED;
                 _dispatchManager.shutdown();
+
                 for (SessionImpl session : _sessions.values())
                 {
-                    try
-                    {
-                        session.closeImpl(false, false);
-                    }
-                    catch (JMSException e)
-                    {
-                        _logger.warn(e, "Error closing session");
-                    }
+                    session.closeImpl(sendClose, false);
                 }
                 _sessions.clear();
+
+                if (sendClose)
+                {
+                    removeTempDestinations();
+                }
+                else
+                {
+                    _tempQueues.clear();
+                }
+
+                for (CloseTask task : _closeTasks)
+                {
+                    task.onClose();
+                }
+
+                if (sendClose && _amqpConnection != null && _state != State.UNCONNECTED)
+                {
+                    _amqpConnection.close();
+                }
             }
 
             _lock.notifyAll();
         }
     }
 
-    // -----------------------------------------
+    void preFailover() throws JMSException
+    {
+        _dispatchManager.stop();
+        for (SessionImpl ssn : _sessions.values())
+        {
+            ssn.preFailover();
+        }
+        _dispatchManager.clearDispatcherQueues();
+    }
+
+    void postFailover() throws JMSException
+    {
+        for (SessionImpl ssn : _sessions.values())
+        {
+            ssn.postFailover();
+        }
+        _dispatchManager.start();
+    }
 
     org.apache.qpid.transport.Connection getAMQPConnection()
     {
@@ -386,6 +489,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         synchronized (_lock)
         {
             _sessions.remove(ssn);
+            _dispatchManager.unregister(ssn.getAMQPSession());
         }
     }
 
@@ -402,6 +506,16 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     void waitForFailoverToComplete()
     {
         _failoverInProgress.waitUntilFalse();
+    }
+
+    /**
+     * @param timeout
+     *            : If timeout == 0, then wait until true.
+     * @return
+     */
+    long waitForFailoverToComplete(long timeout) throws ConditionManagerTimeoutException
+    {
+        return _failoverInProgress.waitUntilFalse(timeout);
     }
 
     void stopDispatcherForSession(SessionImpl ssn)
@@ -447,19 +561,83 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         }
     }
 
-    /**
-     * @param timeout
-     *            : If timeout == 0, then wait until true.
-     * @return
-     */
-    long waitForFailoverToComplete(long timeout) throws ConditionManagerTimeoutException
-    {
-        return _failoverInProgress.waitUntilFalse(timeout);
-    }
-
     public ConnectionConfig getConfig()
     {
         return _config;
+    }
+
+    static interface CloseTask
+    {
+        public void onClose() throws JMSException;
+    }
+
+    void addOnCloseTask(CloseTask task)
+    {
+        synchronized (_lock)
+        {
+            _closeTasks.add(task);
+        }
+    }
+
+    void removeOnCloseTask(CloseTask task)
+    {
+        synchronized (_lock)
+        {
+            _closeTasks.remove(task);
+        }
+    }
+
+    void addTempQueue(TemporaryQueue dest)
+    {
+        _tempQueues.add(dest);
+    }
+
+    void removeTempQueue(TemporaryQueue dest)
+    {
+        _tempQueues.remove(dest);
+    }
+
+    void removeTempQueues(Collection<TemporaryQueue> dests)
+    {
+        _tempQueues.removeAll(dests);
+    }
+
+    // Safety net for temp destinations created off sessions that got closed due
+    // to errors.
+    void removeTempDestinations()
+    {
+        if (_tempQueues.size() == 0)
+        {
+            _logger.info("No temporary destinations to delete");
+            return;
+        }
+
+        org.apache.qpid.transport.Session ssn;
+        try
+        {
+            ssn = _amqpConnection.createSession();
+        }
+        catch (Exception e)
+        {
+            _logger.warn(e, "Error creating protocol session for deleting temp queues");
+            return;
+        }
+
+        for (Iterator<TemporaryQueue> it = _tempQueues.iterator(); it.hasNext();)
+        {
+            TemporaryQueue dest = null;
+            try
+            {
+                dest = it.next();
+                ssn.queueDelete(dest.getQueueName());
+                it.remove();
+                dest = null;
+            }
+            catch (Exception e)
+            {
+                _logger.warn(e, "Error deleting temp queue " + dest == null ? "" : ":" + dest.getQueueName());
+            }
+        }
     }
 
     // ----------------------------------------

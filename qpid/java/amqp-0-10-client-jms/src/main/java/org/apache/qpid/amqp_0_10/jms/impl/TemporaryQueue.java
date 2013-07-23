@@ -7,9 +7,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- *
+ * 
  *   http://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -18,29 +18,17 @@
  * under the License.
  *
  */
-package org.apache.qpid.amqp_0_10.jms.impl.dispatch;
+package org.apache.qpid.amqp_0_10.jms.impl;
 
-public interface DispatchManager<K>
+import javax.jms.JMSException;
+
+interface TemporaryQueue extends TemporaryDestination, javax.jms.TemporaryQueue
 {
-    public void register(K key);
+    public String getQueueName();
 
-    public void unregister(K key);
+    public void deleteQueue(boolean unregister) throws JMSException;
 
-    public void dispatch(Dispatchable<K> dispatchable);
+    public void addConsumer(MessageConsumerImpl cons);
 
-    public void requeue(K key, Dispatchable<K> dispatchable);
-
-    public void sortDispatchQueue(K key);
-
-    public void stopDispatcher(K key);
-
-    public void startDispatcher(K key);
-
-    public void clearDispatcherQueues();
-
-    public void start();
-
-    public void stop();
-
-    public void shutdown();
+    public void removeConsumer(MessageConsumerImpl cons);
 }

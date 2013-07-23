@@ -33,6 +33,12 @@ public class TopicSubscriberImpl extends MessageConsumerImpl implements TopicSub
         super(consumerId, ssn, topic, selector, noLocal, browseOnly, ackMode);
     }
 
+    public TopicSubscriberImpl(String consumerId, SessionImpl ssn, TopicImpl topic, String selector, boolean noLocal,
+            boolean browseOnly, AcknowledgeMode ackMode, String subscriberName) throws JMSException
+    {
+        super(consumerId, ssn, topic, selector, noLocal, browseOnly, ackMode, subscriberName);
+    }
+
     @Override
     public Topic getTopic() throws JMSException
     {

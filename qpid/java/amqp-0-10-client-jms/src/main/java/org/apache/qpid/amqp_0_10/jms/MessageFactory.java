@@ -17,8 +17,6 @@
  */
 package org.apache.qpid.amqp_0_10.jms;
 
-import java.nio.ByteBuffer;
-
 import javax.jms.BytesMessage;
 import javax.jms.MapMessage;
 import javax.jms.Message;
@@ -28,8 +26,6 @@ import javax.jms.StreamMessage;
 import javax.jms.TextMessage;
 
 import org.apache.qpid.jms.ListMessage;
-import org.apache.qpid.transport.DeliveryProperties;
-import org.apache.qpid.transport.MessageProperties;
 import org.apache.qpid.transport.MessageTransfer;
 
 public interface MessageFactory

@@ -25,17 +25,18 @@ import java.util.Map;
 
 import javax.jms.JMSException;
 
+import org.apache.qpid.client.AMQBrokerDetails;
 import org.apache.qpid.client.AMQConnectionURL;
 import org.apache.qpid.configuration.ClientProperties;
 import org.apache.qpid.jms.BrokerDetails;
-import org.apache.qpid.jms.ConnectionURL;
 import org.apache.qpid.properties.ConnectionStartProperties;
 import org.apache.qpid.transport.ConnectionSettings;
 import org.apache.qpid.transport.util.Logger;
 
 /**
- * Helper class to hold all the connection level settings. Used to reduce
- * clutter in ConnectionImpl
+ * Helper class to hold all the connection level settings. Used as a means to
+ * reduce clutter in ConnectionImpl and also to keep AMQConnection and
+ * AMQBrokerDetails away from ConnectionImpl.
  */
 public class ConnectionConfig
 {
@@ -45,10 +46,10 @@ public class ConnectionConfig
 
     private final AMQConnectionURL _url;
 
-    ConnectionConfig(ConnectionImpl conn)
+    ConnectionConfig(ConnectionImpl conn, AMQConnectionURL url)
     {
         _conn = conn;
-        _url = conn.getConnectionURL();
+        _url = url;
     }
 
     public int getMaxPrefetch()
@@ -63,19 +64,13 @@ public class ConnectionConfig
 
     public int getDispatcherCount()
     {
-        //TODO if connection property not null return that else, get the default.
-        return Integer.getInteger(ClientProperties.QPID_DISPATCHER_COUNT,
-                ClientProperties.DEFAULT_DISPATCHER_COUNT);
+        // TODO if connection property not null return that else, get the
+        // default.
+        return Integer.getInteger(ClientProperties.QPID_DISPATCHER_COUNT, ClientProperties.DEFAULT_DISPATCHER_COUNT);
     }
 
-    public ConnectionSettings retrieveConnectionSettings(BrokerDetails brokerDetail)
+    public ConnectionSettings retrieveConnectionSettings(BrokerDetails broker)
     {
-        ConnectionSettings conSettings = brokerDetail.buildConnectionSettings();
-
-        conSettings.setVhost(_url.getVirtualHost());
-        conSettings.setUsername(_url.getUsername());
-        conSettings.setPassword(_url.getPassword());
-
         // Pass client name from connection URL
         Map<String, Object> clientProps = new HashMap<String, Object>();
         try
@@ -83,60 +78,18 @@ public class ConnectionConfig
             clientProps.put(ConnectionStartProperties.CLIENT_ID_0_10, _conn.getClientID());
         }
         catch (JMSException e)
-        {            
-        }
-        conSettings.setClientProperties(clientProps);
-
-        conSettings.setHeartbeatInterval(getHeartbeatInterval(brokerDetail));
-
-        // Check connection-level ssl override setting
-        String connectionSslOption = _url.getOption(ConnectionURL.OPTIONS_SSL);
-        if (connectionSslOption != null)
         {
-            boolean connUseSsl = Boolean.parseBoolean(connectionSslOption);
-            boolean brokerlistUseSsl = conSettings.isUseSSL();
-
-            if (connUseSsl != brokerlistUseSsl)
-            {
-                conSettings.setUseSSL(connUseSsl);
-
-                if (_logger.isDebugEnabled())
-                {
-                    _logger.debug("Applied connection ssl option override, setting UseSsl to: " + connUseSsl);
-                }
-            }
         }
 
+        ConnectionSettings conSettings = new ConnectionSettingsImpl(_url, (AMQBrokerDetails) broker, clientProps);
         return conSettings;
     }
 
-    // The idle_timeout prop is in milisecs while
-    // the new heartbeat prop is in secs
-    private int getHeartbeatInterval(BrokerDetails brokerDetail)
+    /*
+     * Unfortunately AMQCallback handler needs it, so need to expose it.
+     */
+    public AMQConnectionURL getURL()
     {
-        int heartbeat = 0;
-        if (brokerDetail.getProperty(BrokerDetails.OPTIONS_IDLE_TIMEOUT) != null)
-        {
-            _logger.warn("Broker property idle_timeout=<mili_secs> is deprecated, please use heartbeat=<secs>");
-            heartbeat = Integer.parseInt(brokerDetail.getProperty(BrokerDetails.OPTIONS_IDLE_TIMEOUT)) / 1000;
-        }
-        else if (brokerDetail.getProperty(BrokerDetails.OPTIONS_HEARTBEAT) != null)
-        {
-            heartbeat = Integer.parseInt(brokerDetail.getProperty(BrokerDetails.OPTIONS_HEARTBEAT));
-        }
-        else if (Integer.getInteger(ClientProperties.IDLE_TIMEOUT_PROP_NAME) != null)
-        {
-            heartbeat = Integer.getInteger(ClientProperties.IDLE_TIMEOUT_PROP_NAME) / 1000;
-            _logger.warn("JVM arg -Didle_timeout=<mili_secs> is deprecated, please use -Dqpid.heartbeat=<secs>");
-        }
-        else if (Integer.getInteger(ClientProperties.HEARTBEAT) != null)
-        {
-            heartbeat = Integer.getInteger(ClientProperties.HEARTBEAT, ClientProperties.HEARTBEAT_DEFAULT);
-        }
-        else
-        {
-            heartbeat = Integer.getInteger("amqj.heartbeat.delay", ClientProperties.HEARTBEAT_DEFAULT);
-        }
-        return heartbeat;
+        return _url;
     }
 }

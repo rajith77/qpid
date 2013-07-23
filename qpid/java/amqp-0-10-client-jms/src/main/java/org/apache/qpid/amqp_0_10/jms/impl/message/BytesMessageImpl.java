@@ -55,7 +55,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public ByteBuffer getContent() throws JMSException
     {
-        if (getContentReadWriteMode() == Mode.READABLE)
+        if (isReadOnly())
         {
             return _typedBytesContentReader.getData();
         }
@@ -77,14 +77,14 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public long getBodyLength() throws JMSException
     {
-        isContentReadable();
+        checkMessageReadable();
         return _typedBytesContentReader.size();
     }
 
     @Override
     public boolean readBoolean() throws JMSException
     {
-        isContentReadable();
+        checkMessageReadable();
         try
         {
             checkAvailable(1);
@@ -99,7 +99,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public byte readByte() throws JMSException
     {
-        isContentReadable();
+        checkMessageReadable();
         try
         {
             checkAvailable(1);
@@ -114,7 +114,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public int readUnsignedByte() throws JMSException
     {
-        isContentReadable();
+        checkMessageReadable();
         try
         {
             checkAvailable(1);
@@ -129,7 +129,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public short readShort() throws JMSException
     {
-        isContentReadable();
+        checkMessageReadable();
         try
         {
             checkAvailable(2);
@@ -145,7 +145,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public int readUnsignedShort() throws JMSException
     {
-        isContentReadable();
+        checkMessageReadable();
         try
         {
             checkAvailable(2);
@@ -167,7 +167,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public char readChar() throws JMSException
     {
-        isContentReadable();
+        checkMessageReadable();
         try
         {
             checkAvailable(2);
@@ -182,7 +182,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public int readInt() throws JMSException
     {
-        isContentReadable();
+        checkMessageReadable();
         try
         {
             checkAvailable(4);
@@ -197,7 +197,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public long readLong() throws JMSException
     {
-        isContentReadable();
+        checkMessageReadable();
         try
         {
             checkAvailable(8);
@@ -212,7 +212,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public float readFloat() throws JMSException
     {
-        isContentReadable();
+        checkMessageReadable();
         try
         {
             checkAvailable(4);
@@ -227,7 +227,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public double readDouble() throws JMSException
     {
-        isContentReadable();
+        checkMessageReadable();
         try
         {
             checkAvailable(8);
@@ -242,7 +242,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public String readUTF() throws JMSException
     {
-        isContentReadable();
+        checkMessageReadable();
         // we check only for one byte since theoretically the string could be
         // only a single byte when using UTF-8 encoding
 
@@ -263,7 +263,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
         {
             throw new JMSException("byte array must not be null");
         }
-        isContentReadable();
+        checkMessageReadable();
         int count = (_typedBytesContentReader.remaining() >= bytes.length ? bytes.length : _typedBytesContentReader
                 .remaining());
         if (count == 0)
@@ -288,7 +288,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
         {
             throw new JMSException("maxLength must be <= bytes.length");
         }
-        isContentReadable();
+        checkMessageReadable();
         int count = (_typedBytesContentReader.remaining() >= maxLength ? maxLength : _typedBytesContentReader
                 .remaining());
         if (count == 0)
@@ -305,7 +305,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public void reset() throws JMSException
     {
-        setContentReadWriteMode(Mode.READABLE);
+        markReadOnly();
 
         if (_typedBytesContentReader != null)
         {
@@ -320,7 +320,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public void writeBoolean(boolean b) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         try
         {
             _typedBytesContentWriter.writeBooleanImpl(b);
@@ -334,7 +334,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public void writeByte(byte b) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         try
         {
             _typedBytesContentWriter.writeByteImpl(b);
@@ -348,7 +348,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public void writeShort(short i) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         try
         {
             _typedBytesContentWriter.writeShortImpl(i);
@@ -362,7 +362,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public void writeChar(char c) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         try
         {
             _typedBytesContentWriter.writeCharImpl(c);
@@ -376,7 +376,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public void writeInt(int i) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         try
         {
             _typedBytesContentWriter.writeIntImpl(i);
@@ -390,7 +390,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public void writeLong(long l) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         try
         {
             _typedBytesContentWriter.writeLongImpl(l);
@@ -404,7 +404,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public void writeFloat(float v) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         try
         {
             _typedBytesContentWriter.writeFloatImpl(v);
@@ -418,7 +418,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public void writeDouble(double v) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         try
         {
             _typedBytesContentWriter.writeDoubleImpl(v);
@@ -432,7 +432,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public void writeUTF(String string) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         try
         {
             _typedBytesContentWriter.writeLengthPrefixedUTF(string);
@@ -446,7 +446,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public void writeBytes(byte[] bytes) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         try
         {
             writeBytes(bytes, 0, bytes.length);
@@ -460,7 +460,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public void writeBytes(byte[] bytes, int offset, int length) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         try
         {
             _typedBytesContentWriter.writeBytesRaw(bytes, offset, length);
@@ -474,7 +474,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
     @Override
     public void writeObject(Object object) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         if (object == null)
         {
             throw new JMSException("Argument must not be null");
@@ -524,6 +524,12 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
         {
             throw new MessageFormatException("Only primitives plus byte arrays and String are valid types");
         }
+    }
+
+    @Override
+    protected void bodyToString(StringBuffer buf) throws JMSException
+    {
+        buf.append("Body:{raw bytes, length=" + getBodyLength() + "}");
     }
 
     private void checkAvailable(final int i) throws MessageEOFException

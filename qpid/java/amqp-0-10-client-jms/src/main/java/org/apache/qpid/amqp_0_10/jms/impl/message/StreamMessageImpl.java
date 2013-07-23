@@ -137,10 +137,9 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
         _index = -1;
     }
 
-    @Override
-    protected void isContentReadable() throws JMSException
+    protected void checkPreConditionsForReading() throws JMSException
     {
-        super.isContentReadable();
+        super.checkMessageReadable();
         if (_exception != null)
         {
             throw _exception;
@@ -156,7 +155,7 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
     @Override
     public boolean readBoolean() throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         Object o = _list.get(_index);
 
         if (o instanceof Boolean)
@@ -180,7 +179,7 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
     @Override
     public byte readByte() throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         Object o = _list.get(_index);
 
         if (o instanceof Byte)
@@ -204,7 +203,7 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
     @Override
     public int readBytes(byte[] array) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         Object o = _list.get(_index);
 
         if (o == null)
@@ -227,7 +226,7 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
     @Override
     public char readChar() throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         Object o = _list.get(_index);
 
         if (o instanceof Character)
@@ -247,7 +246,7 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
     @Override
     public double readDouble() throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         Object o = _list.get(_index);
 
         if (o instanceof Double)
@@ -275,7 +274,7 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
     @Override
     public float readFloat() throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         Object o = _list.get(_index);
 
         if (o instanceof Float)
@@ -299,7 +298,7 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
     @Override
     public int readInt() throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         Object o = _list.get(_index);
 
         if (o instanceof Integer)
@@ -327,7 +326,7 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
     @Override
     public long readLong() throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         Object o = _list.get(_index);
 
         if (o instanceof Long)
@@ -355,14 +354,14 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
     @Override
     public Object readObject() throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         return _list.get(_index);
     }
 
     @Override
     public short readShort() throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         Object o = _list.get(_index);
 
         if (o instanceof Long)
@@ -390,7 +389,7 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
     @Override
     public String readString() throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         Object value = _list.get(_index);
         if ((value instanceof String) || (value == null))
         {
@@ -409,35 +408,35 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
     @Override
     public void reset() throws JMSException
     {
-        setContentReadWriteMode(Mode.READABLE);
+        markReadOnly();
         _index = -1;
     }
 
     @Override
     public void writeBoolean(boolean value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         _list.add(value);
     }
 
     @Override
     public void writeByte(byte value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         _list.add(value);
     }
 
     @Override
     public void writeBytes(byte[] value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         _list.add(value);
     }
 
     @Override
     public void writeBytes(byte[] value, int offset, int length) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         byte[] newBytes = new byte[length];
         System.arraycopy(value, offset, newBytes, 0, length);
         _list.add(value);
@@ -446,42 +445,42 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
     @Override
     public void writeChar(char value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         _list.add(value);
     }
 
     @Override
     public void writeDouble(double value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         _list.add(value);
     }
 
     @Override
     public void writeFloat(float value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         _list.add(value);
     }
 
     @Override
     public void writeInt(int value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         _list.add(value);
     }
 
     @Override
     public void writeLong(long value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         _list.add(value);
     }
 
     @Override
     public void writeObject(Object value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         if ((value instanceof Boolean) || (value instanceof Byte) || (value instanceof Short)
                 || (value instanceof Integer) || (value instanceof Long) || (value instanceof Character)
                 || (value instanceof Float) || (value instanceof Double) || (value instanceof String)
@@ -500,14 +499,20 @@ public class StreamMessageImpl extends MessageImpl implements StreamMessage, Con
     @Override
     public void writeShort(short value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         _list.add(value);
     }
 
     @Override
     public void writeString(String value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         _list.add(value);
+    }
+
+    @Override
+    protected void bodyToString(StringBuffer buf) throws JMSException
+    {
+        buf.append("Body:{" + _list + "}");
     }
 }

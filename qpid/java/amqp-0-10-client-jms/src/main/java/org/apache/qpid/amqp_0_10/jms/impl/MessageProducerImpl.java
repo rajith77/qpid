@@ -447,6 +447,6 @@ public class MessageProducerImpl implements MessageProducer
         {
             throw new IllegalStateException("Producer is closed");
         }
-        _session.checkClosed();
+        _session.checkPreConditions();
     }
 }

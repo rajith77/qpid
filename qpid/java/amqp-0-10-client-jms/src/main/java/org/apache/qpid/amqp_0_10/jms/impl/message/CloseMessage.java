@@ -31,4 +31,10 @@ public class CloseMessage extends MessageImpl
         return null;
     }
 
+    @Override
+    protected void bodyToString(StringBuffer buf) throws JMSException
+    {       
+        //NOOP
+    }
+
 }

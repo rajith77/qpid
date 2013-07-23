@@ -87,7 +87,7 @@ public class ExceptionHelper
             code = se.getException().getErrorCode().name();
             executionError = se.getException().getErrorCode();
         }
-        if (executionError == ExecutionErrorCode.UNAUTHORIZED_ACCESS || executionError == ExecutionErrorCode.NOT_FOUND)
+        if (executionError == ExecutionErrorCode.UNAUTHORIZED_ACCESS || executionError == ExecutionErrorCode.NOT_ALLOWED)
         {
             JMSException ex = new javax.jms.JMSSecurityException(msg, code);
             ex.initCause(se);

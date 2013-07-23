@@ -51,7 +51,6 @@ import javax.jms.QueueSender;
 import javax.jms.QueueSession;
 import javax.jms.Session;
 import javax.jms.StreamMessage;
-import javax.jms.TemporaryQueue;
 import javax.jms.TemporaryTopic;
 import javax.jms.TextMessage;
 import javax.jms.Topic;
@@ -122,7 +121,10 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private final Map<String, MessageConsumerImpl> _consumers = new ConcurrentHashMap<String, MessageConsumerImpl>(2);
 
-    private final Map<String, DurableTopicSubscriberImpl> _durableSubs = new ConcurrentHashMap<String, DurableTopicSubscriberImpl>(2);
+    private final Map<String, DurableTopicSubscriberImpl> _durableSubs = new ConcurrentHashMap<String, DurableTopicSubscriberImpl>(
+            2);
+
+    private final List<TemporaryQueue> _tempQueues = new ArrayList<TemporaryQueue>();
 
     private final AtomicBoolean _closed = new AtomicBoolean(false);
 
@@ -232,16 +234,23 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
             if (sendClose)
             {
+                for (TemporaryQueue tempQueue: _tempQueues)
+                {
+                    tempQueue.deleteQueue(false);
+                }
+                _tempQueues.clear();
+
                 getAMQPSession().close();
-                getAMQPSession().sync();
             }
+
+            _conn.startDispatcherForSession(this);
         }
     }
 
     @Override
     public void commit() throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         checkTransactional();
 
         if (_failedOverDirty.get())
@@ -275,7 +284,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public void rollback() throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         checkTransactional();
 
         stopMessageDelivery();
@@ -300,6 +309,8 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             }
         }
 
+        System.out.println("SessionImpl.rollback requeList " + requeueList);
+        
         try
         {
             _amqpSession.setAutoSync(true);
@@ -318,6 +329,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
 
         requeueMessages(requeueList);
+        sortDispatchQueue();
 
         for (MessageConsumerImpl cons : _consumers.values())
         {
@@ -334,7 +346,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public void recover() throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         checkNotTransactional();
 
         if (!_conn.isStarted())
@@ -365,6 +377,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
 
         requeueMessages(requeueList);
+        sortDispatchQueue();
 
         for (MessageConsumerImpl cons : _consumers.values())
         {
@@ -380,6 +393,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     void messageReceived(MessageImpl m)
     {
+        System.out.println("SessionImpl.messageReceived xxxx ");
         if (isClosed())
         {
             // drop the message on the floor.
@@ -426,9 +440,14 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     void start() throws JMSException
     {
+        System.out.println("************************* Start called on consumer. " + _consumers);
         for (MessageConsumerImpl cons : _consumers.values())
         {
-            cons.start();
+            System.out.println("************************* Start called on consumer.  Is closed " + cons.isClosed());
+            if (!cons.isClosed())
+            {
+                cons.start();
+            }
         }
         startMessageDelivery();
     }
@@ -439,7 +458,10 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
         for (MessageConsumerImpl cons : _consumers.values())
         {
-            cons.stop();
+            if (!cons.isClosed())
+            {
+                cons.stop();
+            }
         }
 
         try
@@ -467,9 +489,11 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         {
             prod.stopMessageSender();
         }
+
         for (MessageConsumerImpl cons : _consumers.values())
         {
             cons.stopMessageDelivery();
+            cons.clearLocalAndReplayQueue();
         }
     }
 
@@ -488,15 +512,13 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
 
         startMessageDelivery();
+        replayMessages();
     }
 
     @Override
     public MessageProducer createProducer(Destination dest) throws JMSException
     {
-        if (!(dest instanceof DestinationImpl))
-        {
-            throw new InvalidDestinationException("Invalid destination class " + dest.getClass().getName());
-        }
+        verifyDestination(dest, true);
         MessageProducerImpl prod = new MessageProducerImpl(this, (DestinationImpl) dest);
         _producers.add(prod);
         return prod;
@@ -517,11 +539,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public MessageConsumer createConsumer(Destination dest, String selector, boolean noLocal) throws JMSException
     {
-        if (!(dest instanceof DestinationImpl))
-        {
-            throw new InvalidDestinationException("Invalid destination class " + dest.getClass().getName());
-        }
-
+        verifyDestination(dest, false);
         String tag = String.valueOf(_consumerId.incrementAndGet());
         MessageConsumerImpl cons = new MessageConsumerImpl(tag, this, (DestinationImpl) dest, selector, noLocal, false,
                 _ackMode);
@@ -545,17 +563,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     public TopicSubscriber createDurableSubscriber(Topic topic, String name, String selector, boolean noLocal)
             throws JMSException
     {
-        if (!(topic instanceof TopicImpl))
-        {
-            throw new InvalidDestinationException("Invalid Topic Class"
-                    + (topic == null ? ": Null" : topic.getClass().getName()));
-        }
-
-        if ((topic instanceof TemporaryTopic) && ((TemporaryTopicImpl) topic).getSession() != this)
-        {
-            throw new InvalidDestinationException("Cannot use a temporary topic created from a different session");
-        }
-
+        verifyTopic(topic, false);
         if (_durableSubs.containsKey(name))
         {
             DurableTopicSubscriberImpl topicSub = _durableSubs.get(name);
@@ -604,24 +612,21 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public QueueBrowser createBrowser(Queue queue) throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return createBrowser(queue, null);
     }
 
     @Override
-    public QueueBrowser createBrowser(Queue queue, String arg1) throws JMSException
+    public QueueBrowser createBrowser(Queue queue, String selector) throws JMSException
     {
         // TODO Auto-generated method stub
+        verifyQueue(queue, false);
         return null;
     }
 
     @Override
     public TopicPublisher createPublisher(Topic topic) throws JMSException
     {
-        if (!(topic instanceof TopicImpl))
-        {
-            throw new InvalidDestinationException("Invalid Topic Class" + topic.getClass().getName());
-        }
+        verifyTopic(topic, true);
         TopicPublisherImpl prod = new TopicPublisherImpl(this, (TopicImpl) topic);
         _producers.add(prod);
         return prod;
@@ -636,11 +641,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public TopicSubscriber createSubscriber(Topic topic, String selector, boolean noLocal) throws JMSException
     {
-        if (!(topic instanceof TopicImpl))
-        {
-            throw new InvalidDestinationException("Invalid Topic Class" + topic.getClass().getName());
-        }
-
+        verifyTopic(topic, false);
         String tag = String.valueOf(_consumerId.incrementAndGet());
         TopicSubscriberImpl cons = new TopicSubscriberImpl(tag, this, (TopicImpl) topic, selector, noLocal, false,
                 _ackMode);
@@ -663,11 +664,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public QueueReceiver createReceiver(Queue queue, String selector) throws JMSException
     {
-        if (!(queue instanceof QueueImpl))
-        {
-            throw new InvalidDestinationException("Invalid Queue Class" + queue.getClass().getName());
-        }
-
+        verifyQueue(queue, false);
         String tag = String.valueOf(_consumerId.incrementAndGet());
         QueueReceiverImpl cons = new QueueReceiverImpl(tag, this, (QueueImpl) queue, selector, false, false, _ackMode);
         _consumers.put(tag, cons);
@@ -683,11 +680,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public QueueSender createSender(Queue queue) throws JMSException
     {
-        if (!(queue instanceof QueueImpl))
-        {
-            throw new InvalidDestinationException("Invalid Queue Class" + queue.getClass().getName());
-        }
-
+        verifyQueue(queue, true);
         QueueSenderImpl prod = new QueueSenderImpl(this, (QueueImpl) queue);
         _producers.add(prod);
         return prod;
@@ -752,17 +745,17 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     }
 
     @Override
-    public TemporaryQueue createTemporaryQueue() throws JMSException
+    public javax.jms.TemporaryQueue createTemporaryQueue() throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        TemporaryQueueImpl queue = new TemporaryQueueImpl(this);
+        _tempQueues.add(queue);
+        return queue;
     }
 
     @Override
     public TemporaryTopic createTemporaryTopic() throws JMSException
     {
-        // TODO Auto-generated method stub
-        return null;
+        return new TemporaryTopicImpl(this);
     }
 
     @Override
@@ -788,7 +781,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         return _conn;
     }
 
-    void checkClosed() throws JMSException
+    void checkPreConditions() throws JMSException
     {
         if (_closed.get())
         {
@@ -804,6 +797,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
                 throw ex;
             }
         }
+        _conn.waitForFailoverToComplete();
     }
 
     void removeProducer(MessageProducerImpl prod)
@@ -813,6 +807,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     void removeConsumer(MessageConsumerImpl cons)
     {
+        System.out.println("xxxxxxxxxxxxxxxxxxxxxxx Remove called on consumer. " + _consumers);
         _consumers.remove(cons);
     }
 
@@ -870,6 +865,38 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     void requeueMessages(List<MessageImpl> list)
     {
         _conn.requeueMessages(this, list);
+    }
+
+    void sortDispatchQueue()
+    {
+        _conn.sortDispatchQueue(this);
+    }
+
+    void addTempQueue(TemporaryQueue dest)
+    {
+        _tempQueues.add(dest);
+        _conn.addTempQueue(dest);
+    }
+
+    void removeTempQueue(TemporaryQueue dest)
+    {
+        _tempQueues.remove(dest);
+        _conn.removeTempQueue(dest);
+    }
+
+    void replayMessages() throws JMSException
+    {
+        try
+        {
+            for (MessageTransfer transfer: _replayQueue.values())
+            {
+                _amqpSession.invoke(transfer);
+            }
+        }
+        catch (Exception e)
+        {
+            throw ExceptionHelper.toJMSException("Error replaying messages after failover", e);
+        }        
     }
 
     private void checkTransactional() throws JMSException
@@ -934,6 +961,70 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         return _conn.isStarted();
     }
 
+    private void verifyDestination(Destination dest, boolean isNullAllowed) throws JMSException
+    {
+        if (dest == null && isNullAllowed)
+        {
+            return;
+        }
+
+        if (!(dest instanceof DestinationImpl))
+        {
+            throw new InvalidDestinationException("Invalid destination class "
+                    + (dest == null ? ": Null" : dest.getClass().getName()));
+        }
+        verifyTempDestination(dest, "destination");
+    }
+
+    private void verifyTopic(Topic topic, boolean isNullAllowed) throws JMSException
+    {
+        if (topic == null && isNullAllowed)
+        {
+            return;
+        }
+
+        if (!(topic instanceof TopicImpl))
+        {
+            throw new InvalidDestinationException("Invalid Topic Class"
+                    + (topic == null ? ": Null" : topic.getClass().getName()));
+        }
+        verifyTempDestination(topic, "topic");
+    }
+
+    private void verifyQueue(Queue queue, boolean isNullAllowed) throws JMSException
+    {
+        if (queue == null && isNullAllowed)
+        {
+            return;
+        }
+
+        if (!(queue instanceof QueueImpl))
+        {
+            throw new InvalidDestinationException("Invalid Queue Class"
+                    + (queue == null ? ": Null" : queue.getClass().getName()));
+        }
+        verifyTempDestination(queue, "queue");
+    }
+
+    private void verifyTempDestination(Destination dest, String type) throws JMSException
+    {
+        if (dest instanceof TemporaryDestination)
+        {
+            TemporaryDestination tempDest = (TemporaryDestination) dest;
+
+            if (tempDest.getSession() != this)
+            {
+                throw new InvalidDestinationException("Cannot use a temporary " + type
+                        + " created from a different session");
+            }
+
+            if (tempDest.isDeleted())
+            {
+                throw new InvalidDestinationException("The temporary " + type + " is deleted and cannot be used");
+            }
+        }
+    }
+
     // --------------- Unsupported Methods -------------
     @Override
     public void run()
@@ -944,14 +1035,14 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public MessageListener getMessageListener() throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         throw new JmsNotImplementedException();
     }
 
     @Override
     public void setMessageListener(MessageListener listener) throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         throw new JmsNotImplementedException();
     }
 }

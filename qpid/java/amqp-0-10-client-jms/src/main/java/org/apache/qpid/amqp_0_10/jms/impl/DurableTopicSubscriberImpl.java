@@ -14,7 +14,8 @@ public class DurableTopicSubscriberImpl extends TopicSubscriberImpl
     public DurableTopicSubscriberImpl(String subscriberName, String consumerId, SessionImpl ssn, TopicImpl topic,
             String selector, boolean noLocal, boolean browseOnly, AcknowledgeMode ackMode) throws JMSException
     {
-        super(consumerId, ssn, topic, selector, noLocal, browseOnly, ackMode);
+        super(consumerId, ssn, topic, selector, noLocal, browseOnly, ackMode, getSubscriptionQueueName(ssn,
+                subscriberName));
         _subscriberName = subscriberName;
     }
 
@@ -23,7 +24,6 @@ public class DurableTopicSubscriberImpl extends TopicSubscriberImpl
     {
         try
         {
-            setSubscriptionQueue(getSession().getConnection().getClientID() + ":" + _subscriberName);
             AddressResolution.verifyAndCreateDurableTopicSubscription(this);
             setMessageFlowMode();
             getSession().getAMQPSession().sync();
@@ -34,5 +34,23 @@ public class DurableTopicSubscriberImpl extends TopicSubscriberImpl
                     + "]", se);
         }
         _logger.debug("Sucessfully created durable topic subscriber for : " + getTopic());
+    }
+
+    @Override
+    protected void closeConsumer() throws JMSException
+    {
+        cancelSubscription();
+        releaseMessages();
+        getSession().getAMQPSession().sync();
+    }
+    
+    public String getSubscriberName()
+    {
+        return _subscriberName;
+    }
+
+    private static String getSubscriptionQueueName(SessionImpl ssn, String subscriberName) throws JMSException
+    {
+        return ssn.getConnection().getClientID() + ":" + subscriberName;
     }
 }

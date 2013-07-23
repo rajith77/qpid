@@ -135,10 +135,8 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
         _exception = null;
     }
 
-    @Override
-    protected void isContentReadable() throws JMSException
+    protected void checkPreConditionsForReading() throws JMSException
     {
-        super.isContentReadable();
         if (_exception != null)
         {
             throw _exception;
@@ -148,7 +146,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public boolean getBoolean(String name) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         checkPropertyName(name);
         Object o = _map.get(name);
 
@@ -173,7 +171,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public byte getByte(String name) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         checkPropertyName(name);
         Object o = _map.get(name);
 
@@ -198,7 +196,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public byte[] getBytes(String name) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         checkPropertyName(name);
         Object o = _map.get(name);
 
@@ -220,7 +218,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public char getChar(String name) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         checkPropertyName(name);
         Object o = _map.get(name);
 
@@ -247,7 +245,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public double getDouble(String name) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         checkPropertyName(name);
         Object o = _map.get(name);
 
@@ -275,7 +273,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public float getFloat(String name) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         checkPropertyName(name);
         Object o = _map.get(name);
 
@@ -300,7 +298,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public int getInt(String name) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         checkPropertyName(name);
         Object o = _map.get(name);
 
@@ -329,7 +327,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public long getLong(String name) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         checkPropertyName(name);
         Object o = _map.get(name);
 
@@ -372,7 +370,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public Object getObject(String name) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         checkPropertyName(name);
         return _map.get(name);
     }
@@ -380,7 +378,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public short getShort(String name) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         checkPropertyName(name);
         Object o = _map.get(name);
 
@@ -427,7 +425,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public boolean itemExists(String name) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         checkPropertyName(name);
         return _map.containsKey(name);
     }
@@ -435,7 +433,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public void setBoolean(String name, boolean value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         checkPropertyName(name);
         _map.put(name, value);
     }
@@ -443,7 +441,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public void setByte(String name, byte value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         checkPropertyName(name);
         _map.put(name, value);
     }
@@ -451,7 +449,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public void setBytes(String name, byte[] value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         checkPropertyName(name);
         _map.put(name, value);
     }
@@ -474,7 +472,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public void setChar(String name, char value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         checkPropertyName(name);
         _map.put(name, value);
     }
@@ -482,7 +480,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public void setDouble(String name, double value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         checkPropertyName(name);
         _map.put(name, value);
     }
@@ -490,7 +488,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public void setFloat(String name, float value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         checkPropertyName(name);
         _map.put(name, value);
     }
@@ -498,7 +496,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public void setInt(String name, int value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         checkPropertyName(name);
         _map.put(name, value);
     }
@@ -506,7 +504,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public void setLong(String name, long value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         checkPropertyName(name);
         _map.put(name, value);
     }
@@ -514,7 +512,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public void setShort(String name, short value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         checkPropertyName(name);
         _map.put(name, value);
     }
@@ -522,7 +520,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public void setString(String name, String value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         checkPropertyName(name);
         _map.put(name, value);
     }
@@ -530,7 +528,7 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     @Override
     public void setObject(String propName, Object value) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         checkPropertyName(propName);
         if ((value instanceof Boolean) || (value instanceof Byte) || (value instanceof Short)
                 || (value instanceof Integer) || (value instanceof Long) || (value instanceof Character)
@@ -557,5 +555,11 @@ public class MapMessageImpl extends MessageImpl implements MapMessage, ContentTy
     Map<String, Object> getMap()
     {
         return _map;
+    }
+
+    @Override
+    protected void bodyToString(StringBuffer buf) throws JMSException
+    {
+        buf.append("Body:{" + _map + "}");
     }
 }

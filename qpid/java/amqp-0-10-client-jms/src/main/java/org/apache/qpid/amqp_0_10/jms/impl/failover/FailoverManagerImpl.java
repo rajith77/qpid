@@ -18,29 +18,26 @@
  * under the License.
  *
  */
-package org.apache.qpid.amqp_0_10.jms.impl.dispatch;
+package org.apache.qpid.amqp_0_10.jms.impl.failover;
 
-public interface DispatchManager<K>
+import org.apache.qpid.amqp_0_10.jms.Connection;
+import org.apache.qpid.amqp_0_10.jms.FailoverManager;
+import org.apache.qpid.amqp_0_10.jms.FailoverUnsuccessfulException;
+import org.apache.qpid.amqp_0_10.jms.impl.ConnectionImpl;
+
+public class FailoverManagerImpl implements FailoverManager
 {
-    public void register(K key);
+    private ConnectionImpl _conn;
+    
+    @Override
+    public void init(Connection con)
+    {
+        _conn = (ConnectionImpl)con;
+    }
 
-    public void unregister(K key);
+    @Override
+    public void connect() throws FailoverUnsuccessfulException
+    {
 
-    public void dispatch(Dispatchable<K> dispatchable);
-
-    public void requeue(K key, Dispatchable<K> dispatchable);
-
-    public void sortDispatchQueue(K key);
-
-    public void stopDispatcher(K key);
-
-    public void startDispatcher(K key);
-
-    public void clearDispatcherQueues();
-
-    public void start();
-
-    public void stop();
-
-    public void shutdown();
+    }
 }

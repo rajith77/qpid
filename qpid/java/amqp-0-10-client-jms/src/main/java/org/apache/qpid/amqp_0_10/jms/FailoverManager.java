@@ -18,29 +18,25 @@
  * under the License.
  *
  */
-package org.apache.qpid.amqp_0_10.jms.impl.dispatch;
+package org.apache.qpid.amqp_0_10.jms;
 
-public interface DispatchManager<K>
+/**
+ * If an application wants to override default failover behavior, It can
+ * implement this interface and pass the implementation class name either as a
+ * connection parameter or specify it using
+ * -Dqpid.failover_manager=<class-name>.
+ * 
+ */
+public interface FailoverManager
 {
-    public void register(K key);
+    public void init(Connection con);
 
-    public void unregister(K key);
-
-    public void dispatch(Dispatchable<K> dispatchable);
-
-    public void requeue(K key, Dispatchable<K> dispatchable);
-
-    public void sortDispatchQueue(K key);
-
-    public void stopDispatcher(K key);
-
-    public void startDispatcher(K key);
-
-    public void clearDispatcherQueues();
-
-    public void start();
-
-    public void stop();
-
-    public void shutdown();
+    /**
+     * This method should either call @See Connection.connect(ConnectionSettings
+     * settings) method, with the next broker to connect to, or throw
+     * FailoverUnsuccessfulException
+     * 
+     * @throws FailoverUnsuccessfulException
+     */
+    public void connect() throws FailoverUnsuccessfulException;
 }

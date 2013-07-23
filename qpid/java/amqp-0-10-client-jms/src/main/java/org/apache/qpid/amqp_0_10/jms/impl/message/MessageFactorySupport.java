@@ -22,7 +22,7 @@ public class MessageFactorySupport
         }
         catch (Exception e)
         {
-            Error er = new Error("Unable to load message factory");
+            Error er = new Error("Unable to load default MessageFactory");
             er.initCause(e);
             throw er;
         }
@@ -44,7 +44,7 @@ public class MessageFactorySupport
         }
         catch (Exception e)
         {
-            throw ExceptionHelper.toJMSException("Error getting message factory instance", e);
+            throw ExceptionHelper.toJMSException("Error getting MessageFactory instance", e);
         }
     }
 }

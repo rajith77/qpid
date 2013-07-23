@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.qpid.amqp_0_10.jms.impl.ConnectionImpl;
 import org.apache.qpid.thread.Threading;
@@ -32,13 +33,14 @@ import org.apache.qpid.transport.util.Logger;
 
 /**
  * Bare bones implementation of the DispatcherManager. A more intelligent and
- * efficient implementation could be done.
+ * efficient implementation could be done. Not thread safe on it's own. Relies
+ * on the ConnectionImpl for thread safety.
  * 
  */
 public class DispatchManagerImpl implements DispatchManager<Session>
 {
     private static final Logger _logger = Logger.get(DispatchManagerImpl.class);
-    
+
     private final int _dispatcherCount;
 
     private final ConnectionImpl _conn;
@@ -46,6 +48,8 @@ public class DispatchManagerImpl implements DispatchManager<Session>
     private final Map<Session, Dispatcher<Session>> _dispatcherMap = new ConcurrentHashMap<Session, Dispatcher<Session>>();
 
     private final List<Dispatcher<Session>> _dispatchers;
+
+    private final AtomicBoolean _closed = new AtomicBoolean(false);
 
     private int _nextDispatcherIndex = 0;
 
@@ -77,42 +81,79 @@ public class DispatchManagerImpl implements DispatchManager<Session>
     }
 
     /**
-     * Pre Condition : Message delivery for this session should be stopped before
-     *                 invoking this method.
+     * Pre Condition : Message delivery for this session should be stopped
+     * before invoking this method.
      */
     @Override
     public void requeue(Session key, Dispatchable<Session> dispatchable)
     {
-        Dispatcher<Session> dispatcher = _dispatcherMap.get(key);
-        if (dispatcher != null)
+        if (!_closed.get())
         {
-            dispatcher.add(dispatchable);
-        }
-        else
-        {
-            _logger.warn("The session has been closed. Unable to requeue");
+            Dispatcher<Session> dispatcher = _dispatcherMap.get(key);
+            if (dispatcher != null)
+            {
+                dispatcher.add(dispatchable);
+            }
+            else
+            {
+                _logger.warn("The session has been closed. Unable to requeue");
+            }
         }
     }
 
     @Override
     public void sortDispatchQueue(Session key)
     {
-        _dispatcherMap.get(key).sort();
+        if (!_closed.get())
+        {
+            Dispatcher<Session> dispatcher = _dispatcherMap.get(key);
+            if (dispatcher != null)
+            {
+                dispatcher.sort();
+            }
+            else
+            {
+                _logger.warn("The session has been closed. Unable to sort the dispatcher queue");
+            }
+        }
     }
-    
+
     @Override
     public void dispatch(Dispatchable<Session> dispatchable) throws NullPointerException
     {
-        _dispatcherMap.get(dispatchable.getKey()).add(dispatchable);
+        if (!_closed.get())
+        {
+            Dispatcher<Session> dispatcher = _dispatcherMap.get(dispatchable.getKey());
+            if (dispatcher != null)
+            {
+                dispatcher.add(dispatchable);
+            }
+            else
+            {
+                _logger.warn("The session has been closed. Not session to dispatch dispatchable : " + dispatchable);
+            }
+        }
+    }
+
+    @Override
+    public void clearDispatcherQueues()
+    {
+        for (Dispatcher<Session> dispatcher : _dispatchers)
+        {
+            dispatcher.clearQueue();
+        }
     }
 
     @Override
     public void startDispatcher(Session key)
     {
-        Dispatcher<Session> dispatcher = _dispatcherMap.get(key);
-        dispatcher.signalDispatcherToStart();
+        if (!_closed.get())
+        {
+            Dispatcher<Session> dispatcher = _dispatcherMap.get(key);
+            dispatcher.signalDispatcherToStart();
+        }
     }
-    
+
     @Override
     public void start()
     {
@@ -125,36 +166,44 @@ public class DispatchManagerImpl implements DispatchManager<Session>
     @Override
     public void stopDispatcher(Session key)
     {
-        Dispatcher<Session> dispatcher = _dispatcherMap.get(key);
-        dispatcher.signalDispatcherToStop();
-        dispatcher.interrupt();
-        dispatcher.waitForDispatcherToStop();
+        if (!_closed.get())
+        {
+            Dispatcher<Session> dispatcher = _dispatcherMap.get(key);
+            dispatcher.signalDispatcherToStop();
+            dispatcher.waitForDispatcherToStop();
+        }
     }
-    
+
     @Override
     public void stop()
     {
-        for (Dispatcher<Session> dispatcher : _dispatchers)
+        if (!_closed.get())
         {
-            dispatcher.signalDispatcherToStop();
-            dispatcher.interrupt();
-            dispatcher.waitForDispatcherToStop();
+            for (Dispatcher<Session> dispatcher : _dispatchers)
+            {
+                dispatcher.signalDispatcherToStop();
+                dispatcher.interrupt();
+                dispatcher.waitForDispatcherToStop();
+            }
         }
     }
 
     @Override
     public void shutdown()
     {
-        for (Dispatcher<Session> dispatcher : _dispatchers)
+        if (!_closed.get())
         {
-            dispatcher.signalDispatcherToShutdown();
-            dispatcher.interrupt();
-            dispatcher.waitForDispatcherToShutdown();
-            dispatcher.drainQueue();
+            _closed.set(true);
+            for (Dispatcher<Session> dispatcher : _dispatchers)
+            {
+                dispatcher.signalDispatcherToShutdown();
+                dispatcher.interrupt();
+                dispatcher.waitForDispatcherToShutdown();
+                dispatcher.clearQueue();
+            }
+            _dispatcherMap.clear();
+            _dispatchers.clear();
         }
-        _dispatcherMap.clear();
-        _dispatchers.clear();
-
     }
 
     private void initDispatchers()

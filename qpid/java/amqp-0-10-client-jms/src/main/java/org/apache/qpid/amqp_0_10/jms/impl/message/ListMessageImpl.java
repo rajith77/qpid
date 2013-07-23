@@ -49,63 +49,63 @@ public class ListMessageImpl extends StreamMessageImpl implements ListMessage
     @Override
     public boolean add(Object e) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         return _list.add(e);
     }
 
     @Override
     public void add(int index, Object e) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         _list.add(index, e);
     }
 
     @Override
     public boolean contains(Object e) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         return _list.contains(e);
     }
 
     @Override
     public Object get(int index) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         return _list.get(index);
     }
 
     @Override
     public int indexOf(Object e) throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         return _list.indexOf(e);
     }
 
     @Override
     public Iterator<Object> iterator() throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         return _list.iterator();
     }
 
     @Override
     public Object remove(int index) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         return _list.remove(index);
     }
 
     @Override
     public boolean remove(Object e) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         return _list.remove(e);
     }
 
     @Override
     public Object set(int index, Object e) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         return _list.set(index, e);
     }
 
@@ -118,21 +118,21 @@ public class ListMessageImpl extends StreamMessageImpl implements ListMessage
     @Override
     public Object[] toArray() throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         return _list.toArray();
     }
 
     @Override
     public List<Object> asList() throws JMSException
     {
-        isContentReadable();
+        checkPreConditionsForReading();
         return Collections.unmodifiableList(_list);
     }
 
     @Override
     public void setList(List<Object> l) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         _list = l;
     }
 }

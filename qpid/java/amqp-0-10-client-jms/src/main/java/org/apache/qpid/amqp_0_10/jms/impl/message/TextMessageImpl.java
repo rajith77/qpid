@@ -131,7 +131,6 @@ public class TextMessageImpl extends MessageImpl implements TextMessage, Content
     @Override
     public String getText() throws JMSException
     {
-        isContentReadable();
         if (_exception != null)
         {
             throw _exception;
@@ -142,7 +141,7 @@ public class TextMessageImpl extends MessageImpl implements TextMessage, Content
     @Override
     public void setText(String txt) throws JMSException
     {
-        isContentWritable();
+        checkMessageWritable();
         if (txt == null)
         {
             setBooleanProperty(PAYLOAD_NULL_PROPERTY, true);
@@ -152,5 +151,11 @@ public class TextMessageImpl extends MessageImpl implements TextMessage, Content
             removeProperty(PAYLOAD_NULL_PROPERTY);
         }
         _string = txt;
+    }
+
+    @Override
+    protected void bodyToString(StringBuffer buf) throws JMSException
+    {
+        buf.append("Body:{" + _string + "}");
     }
 }

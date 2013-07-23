@@ -47,11 +47,11 @@ public class Dispatcher<K> implements Runnable
     {
     }
 
-    public void add(Dispatchable<K> disp)
+    public void add(Dispatchable<K> dispatchable)
     {
         try
         {
-            _dispatchQueue.put(disp);
+            _dispatchQueue.put(dispatchable);
         }
         catch (InterruptedException e)
         {
@@ -71,7 +71,7 @@ public class Dispatcher<K> implements Runnable
                 if (_stopped.get())
                 {
                     _dispatcherStarted.setValueAndNotify(false);
-                    System.out.println("XXXXXXXXXXXXXXXXX Stopped true, so _dispatcherStarted : " + _dispatcherStarted.getCurrentValue());
+                    System.out.println("XXXXXXXXXXXXXXXXX Stopped true, Value of _dispatcherStarted=" + _dispatcherStarted.getCurrentValue());
                 }
                 
                 _dispatcherStarted.waitUntilTrue();
@@ -80,11 +80,12 @@ public class Dispatcher<K> implements Runnable
                 {
                     try
                     {
-                        System.out.println("XXXXXXXXXXXXXXXXX going take message and dispatch: " + _dispatcherStarted.getCurrentValue());
+                        System.out.println("XXXXXXXXXXXXXXXXX going take message and dispatch, value of _dispatcherStarted=" + _dispatcherStarted.getCurrentValue());
                         _dispatchQueue.take().dispatch();                    
                     }
                     catch (InterruptedException e)
                     {
+                        System.out.println("Got interruptted :)");
                         // continue
                     }
                 }
@@ -94,7 +95,7 @@ public class Dispatcher<K> implements Runnable
         finally
         {
             _dispatcherShutdown.setValueAndNotify(true);
-            System.out.println("XXXXXXXXXXXXXXXXX _dispatcherShutdown notified true, so _dispatcherShutdown : " + _dispatcherShutdown.getCurrentValue());
+            System.out.println("XXXXXXXXXXXXXXXXX _dispatcherShutdown notified true, value of _dispatcherShutdown=" + _dispatcherShutdown.getCurrentValue());
         }
     }
 
@@ -147,7 +148,7 @@ public class Dispatcher<K> implements Runnable
         }
     }
 
-    public void drainQueue()
+    public void clearQueue()
     {
         _dispatchQueue.clear();
     }
@@ -157,6 +158,7 @@ public class Dispatcher<K> implements Runnable
         List<Dispatchable<K>> list = new ArrayList<Dispatchable<K>>(_dispatchQueue.size());
         _dispatchQueue.drainTo(list);
         Collections.sort(list, new DispatchableComparator<K>());
+        _dispatchQueue.addAll(list);
     }
 
     public void setThread(Thread thread)

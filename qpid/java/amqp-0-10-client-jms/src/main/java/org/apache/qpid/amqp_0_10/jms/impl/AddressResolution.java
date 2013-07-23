@@ -205,7 +205,8 @@ public class AddressResolution
             }
             else if (!(result.getKeyNotMatched() || result.getArgsNotMatched()))
             {
-                // The queue is bound to the exchange with a different key and args.
+                // The queue is bound to the exchange with a different key and
+                // args.
                 // We need to delete that association as per the JMS spec.
                 ssn.getAMQPSession().queueDelete(subscriptionQueue);
                 createQueue = true;
@@ -220,6 +221,23 @@ public class AddressResolution
                         Option.DURABLE, Option.EXCLUSIVE);
             }
             ssn.getAMQPSession().exchangeBind(subscriptionQueue, addr.getName(), addr.getSubject(), null);
+
+            Map<String, Object> args = null;
+            if (dest.getAddress().getLink().getSubscription().getArgs().size() > 0)
+            {
+                args = dest.getAddress().getLink().getSubscription().getArgs();
+            }
+
+            try
+            {
+                ssn.getAMQPSession().messageSubscribe(subscriptionQueue, cons.getConsumerId(),
+                        MessageAcceptMode.EXPLICIT, MessageAcquireMode.PRE_ACQUIRED, null, 0, args,
+                        dest.getAddress().getLink().getSubscription().isExclusive() ? Option.EXCLUSIVE : Option.NONE);
+            }
+            catch (Exception e)
+            {
+                throw ExceptionHelper.toJMSException("Error creating subscription.", e);
+            }
         }
         catch (Exception e)
         {
@@ -442,8 +460,8 @@ public class AddressResolution
 
             if (name == null)
             {
-                name = link.getName() == null ? "TempQueue_" + UUID.randomUUID() : dest.getAddress().getLink()
-                        .getName();
+                name = link.getName() == null ? "TopicSubscriptionQueue_" + UUID.randomUUID() : dest.getAddress()
+                        .getLink().getName();
             }
 
             Map<String, Object> args = queue.getDeclareArgs();
@@ -626,26 +644,34 @@ public class AddressResolution
 
     static NodeQueryStatus verifyNodeExists(SessionImpl ssn, DestinationImpl dest)
     {
-        String name = dest.getAddress().getName();
-        ExchangeBoundResult result = ssn.getAMQPSession().exchangeBound(name, name, null, null).get();
-        if (result.getQueueNotFound() && result.getExchangeNotFound())
+        try
         {
-            // neither a queue nor an exchange exists with that name
+            String name = dest.getAddress().getName();
+            ExchangeBoundResult result = ssn.getAMQPSession().exchangeBound(name, name, null, null).get();
+            if (result.getQueueNotFound() && result.getExchangeNotFound())
+            {
+                // neither a queue nor an exchange exists with that name
+                return NodeQueryStatus.NOT_FOUND;
+            }
+            else if (result.getExchangeNotFound())
+            {
+                // name refers to a queue
+                return NodeQueryStatus.QUEUE;
+            }
+            else if (result.getQueueNotFound())
+            {
+                // name refers to an exchange
+                return NodeQueryStatus.EXCHANGE;
+            }
+            else
+            {
+                return NodeQueryStatus.AMBIGUOUS;
+            }
+        }
+        catch (Exception e)
+        {
+            System.out.println("Erro looking up exchange : " + dest.getAddress().getName());
             return NodeQueryStatus.NOT_FOUND;
-        }
-        else if (result.getExchangeNotFound())
-        {
-            // name refers to a queue
-            return NodeQueryStatus.QUEUE;
-        }
-        else if (result.getQueueNotFound())
-        {
-            // name refers to an exchange
-            return NodeQueryStatus.EXCHANGE;
-        }
-        else
-        {
-            return NodeQueryStatus.AMBIGUOUS;
         }
     }
 

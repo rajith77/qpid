@@ -50,11 +50,6 @@ import org.apache.qpid.transport.ReplyTo;
 
 public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apache.qpid.transport.Session>
 {
-    protected enum Mode
-    {
-        READABLE, WRITABLE
-    };
-
     private static boolean ALLOCATE_DIRECT = Boolean.getBoolean("qpid.allocate-direct");
 
     /**
@@ -109,9 +104,7 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
 
     private String _messageID = null;
 
-    private Mode _propertyReadWriteMode;
-
-    private Mode _contentReadWriteMode;
+    private boolean _msgReadOnly;
 
     private SessionImpl _ssn = null;
 
@@ -123,8 +116,7 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
     {
         _deliveryProps = new DeliveryProperties();
         _messageProps = new MessageProperties();
-        _propertyReadWriteMode = Mode.WRITABLE;
-        _contentReadWriteMode = Mode.WRITABLE;
+        _msgReadOnly = false;
         _transferId = -1;
         _consumerId = null;
     }
@@ -135,8 +127,7 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
         _ssn = ssn;
         _deliveryProps = deliveryProps;
         _messageProps = msgProps;
-        _propertyReadWriteMode = Mode.READABLE;
-        _contentReadWriteMode = Mode.READABLE;
+        _msgReadOnly = true;
         _transferId = transferId;
         _consumerId = consumerId;
     }
@@ -189,7 +180,7 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
     @Override
     public void clearBody() throws JMSException
     {
-        _contentReadWriteMode = Mode.WRITABLE;
+        _msgReadOnly = false;
     }
 
     @Override
@@ -312,7 +303,14 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
                     String exchange = replyTo.getExchange();
                     String routingKey = replyTo.getRoutingKey();
 
-                    dest = DestinationImpl.createDestination(exchange.concat("/").concat(routingKey));
+                    if (exchange.equals(""))
+                    {
+                        dest = new QueueImpl(routingKey.concat(";{create:always}"));
+                    }
+                    else
+                    {
+                        dest = new TopicImpl(exchange.concat("/").concat(routingKey));
+                    }
                     REPLY_TO_DEST_CACHE.put(replyTo, dest);
                 }
 
@@ -437,7 +435,6 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
     @Override
     public boolean getBooleanProperty(String propertyName) throws JMSException
     {
-        isPropertyReadable();
         checkPropertyName(propertyName);
         Object o = getApplicationProperty(propertyName);
 
@@ -463,7 +460,6 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
     @Override
     public byte getByteProperty(String propertyName) throws JMSException
     {
-        isPropertyReadable();
         checkPropertyName(propertyName);
         Object o = getApplicationProperty(propertyName);
 
@@ -489,7 +485,6 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
     @Override
     public short getShortProperty(String propertyName) throws JMSException
     {
-        isPropertyReadable();
         checkPropertyName(propertyName);
         Object o = getApplicationProperty(propertyName);
 
@@ -518,7 +513,6 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
     @Override
     public int getIntProperty(String propertyName) throws JMSException
     {
-        isPropertyReadable();
         checkPropertyName(propertyName);
         Object o = getApplicationProperty(propertyName);
 
@@ -548,7 +542,6 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
     @Override
     public long getLongProperty(String propertyName) throws JMSException
     {
-        isPropertyReadable();
         checkPropertyName(propertyName);
         Object o = getApplicationProperty(propertyName);
 
@@ -578,7 +571,6 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
     @Override
     public float getFloatProperty(String propertyName) throws JMSException
     {
-        isPropertyReadable();
         checkPropertyName(propertyName);
         Object o = getApplicationProperty(propertyName);
 
@@ -604,7 +596,6 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
     @Override
     public double getDoubleProperty(String propertyName) throws JMSException
     {
-        isPropertyReadable();
         checkPropertyName(propertyName);
         Object o = getApplicationProperty(propertyName);
 
@@ -634,7 +625,6 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
     @Override
     public String getStringProperty(String propertyName) throws JMSException
     {
-        isPropertyReadable();
         if (propertyName.equals(CustomJMSXProperty.JMSXUserID.toString()))
         {
             return new String(_messageProps.getUserId());
@@ -680,7 +670,6 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
     @Override
     public Object getObjectProperty(String propertyName) throws JMSException
     {
-        isPropertyReadable();
         checkPropertyName(propertyName);
         return getApplicationProperty(propertyName);
     }
@@ -758,7 +747,7 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
         if (QpidMessageProperties.AMQP_0_10_APP_ID.equals(propertyName))
         {
             checkPropertyName(propertyName);
-            isPropertyWritable();
+            checkMessageWritable();
             _messageProps.setAppId(value.getBytes());
         }
         else
@@ -789,9 +778,26 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
         {
             _messageProps.clearApplicationHeaders();
         }
-
-        _propertyReadWriteMode = Mode.WRITABLE;
     }
+
+    @Override
+    public String toString()
+    {
+        try
+        {
+            StringBuffer buf = new StringBuffer();
+            headerToString(buf);
+            bodyToString(buf);
+
+            return buf.toString();
+        }
+        catch (JMSException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    protected abstract void bodyToString(StringBuffer buf) throws JMSException;
 
     void setContentType(String contentType)
     {
@@ -834,7 +840,7 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
 
     void setApplicationHeader(String propertyName, Object object) throws JMSException
     {
-        isPropertyWritable();
+        checkMessageWritable();
         checkPropertyName(propertyName);
 
         Map<String, Object> headers = _messageProps.getApplicationHeaders();
@@ -855,47 +861,31 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
         }
     }
 
-    protected void isPropertyWritable() throws MessageNotWriteableException
+    protected void checkMessageWritable() throws MessageNotWriteableException
     {
-        if (Mode.WRITABLE != _propertyReadWriteMode)
+        if (_msgReadOnly)
         {
             throw new MessageNotWriteableException(
                     "You need to call clearProperties() to make the message properties writable");
         }
     }
 
-    protected void isPropertyReadable() throws MessageNotReadableException
+    protected void checkMessageReadable() throws MessageNotReadableException
     {
-        if (Mode.READABLE != _propertyReadWriteMode)
+        if (!_msgReadOnly)
         {
-            throw new MessageNotReadableException("Message properties are in writable mode.");
+            throw new MessageNotReadableException("You need to call reset() to make the message readable");
         }
     }
 
-    protected void isContentWritable() throws JMSException
+    protected void markReadOnly()
     {
-        if (Mode.WRITABLE != _contentReadWriteMode)
-        {
-            throw new MessageNotWriteableException("You need to call clearBody() to make the message content writable");
-        }
+        _msgReadOnly = true;
     }
 
-    protected void isContentReadable() throws JMSException
+    protected boolean isReadOnly()
     {
-        if (Mode.READABLE != _contentReadWriteMode)
-        {
-            throw new MessageNotReadableException("Message properties are in writable mode.");
-        }
-    }
-
-    protected void setContentReadWriteMode(Mode m)
-    {
-        _contentReadWriteMode = m;
-    }
-
-    protected Mode getContentReadWriteMode()
-    {
-        return _contentReadWriteMode;
+        return _msgReadOnly;
     }
 
     protected void checkPropertyName(CharSequence propertyName) throws JMSException
@@ -995,6 +985,42 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
             {
                 throw new IllegalArgumentException("Identifier '" + propertyName + "' is not allowed in JMS");
             }
+        }
+    }
+
+    void headerToString(StringBuffer buf) throws JMSException
+    {
+        buf.append("\nJMS MessageID: ").append(getJMSMessageID());
+        buf.append("\nJMS Destination: ").append(getJMSDestination());
+        buf.append("\nJMS Type: ").append(getJMSType());
+        buf.append("\nJMS Content-Type: ").append(getContentType());
+        buf.append("\nAMQ message number: ").append(_transferId);
+        buf.append("\nJMS Correlation ID: ").append(getJMSCorrelationID());
+        buf.append("\nJMS timestamp: ").append(getJMSTimestamp());
+        buf.append("\nJMS expiration: ").append(getJMSExpiration());
+        buf.append("\nJMS priority: ").append(getJMSPriority());
+        buf.append("\nJMS delivery mode: ").append(
+                getJMSDeliveryMode() == DeliveryMode.PERSISTENT ? "PERSISTENT" : "NON_PERSISTENT");
+        buf.append("\nJMS reply to: ").append(getJMSReplyTo());
+        buf.append("\nJMS Redelivered: ").append(getJMSRedelivered());
+
+        buf.append("\nProperties:");
+        @SuppressWarnings("rawtypes")
+        final Enumeration propertyNames = getPropertyNames();
+        if (!propertyNames.hasMoreElements())
+        {
+            buf.append("<NONE>");
+        }
+        else
+        {
+            buf.append("\n{");
+            while (propertyNames.hasMoreElements())
+            {
+                String propertyName = (String) propertyNames.nextElement();
+                buf.append("\t").append(propertyName).append(" = ").append(getObjectProperty(propertyName))
+                        .append("\n");
+            }
+            buf.append("}");
         }
     }
 

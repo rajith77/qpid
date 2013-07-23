@@ -18,29 +18,13 @@
  * under the License.
  *
  */
-package org.apache.qpid.amqp_0_10.jms.impl.dispatch;
+package org.apache.qpid.amqp_0_10.jms;
 
-public interface DispatchManager<K>
+import javax.jms.JMSException;
+
+import org.apache.qpid.transport.ConnectionSettings;
+
+public interface Connection extends javax.jms.Connection
 {
-    public void register(K key);
-
-    public void unregister(K key);
-
-    public void dispatch(Dispatchable<K> dispatchable);
-
-    public void requeue(K key, Dispatchable<K> dispatchable);
-
-    public void sortDispatchQueue(K key);
-
-    public void stopDispatcher(K key);
-
-    public void startDispatcher(K key);
-
-    public void clearDispatcherQueues();
-
-    public void start();
-
-    public void stop();
-
-    public void shutdown();
+    public void connect(ConnectionSettings settings) throws JMSException;
 }
