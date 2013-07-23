@@ -198,15 +198,7 @@ public class Connection extends ConnectionInvoker
 
     public void connect(String host, int port, String vhost, String username, String password, boolean ssl, String saslMechs, Map<String,Object> clientProps)
     {
-        ConnectionSettings settings = new ConnectionSettings();
-        settings.setHost(host);
-        settings.setPort(port);
-        settings.setVhost(vhost);
-        settings.setUsername(username);
-        settings.setPassword(password);
-        settings.setUseSSL(ssl);
-        settings.setSaslMechs(saslMechs);
-        settings.setClientProperties(clientProps);
+        ConnectionSettings settings = new DefaultConnectionSettingsImpl(host, port, vhost, username, password, ssl, saslMechs, clientProps);
         connect(settings);
     }
 

@@ -33,6 +33,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -154,7 +155,7 @@ public class ConnectionTest extends QpidTestCase implements SessionListener
     private Connection connect(final CountDownLatch closed)
     {
         final Connection conn = new Connection();
-        conn.setConnectionDelegate(new ClientDelegate(new ConnectionSettings()));
+        conn.setConnectionDelegate(new ClientDelegate(getConnectionSettings()));
 
         conn.addConnectionListener(new ConnectionListener()
         {
@@ -281,7 +282,7 @@ public class ConnectionTest extends QpidTestCase implements SessionListener
 
         Connection conn = new Connection();
         conn.addConnectionListener(new FailoverConnectionListener());
-        conn.setConnectionDelegate(new ClientDelegate(new ConnectionSettings()));
+        conn.setConnectionDelegate(new ClientDelegate(getConnectionSettings()));
         conn.connect("localhost", port, null, "guest", "guest", false, null);
         Session ssn = conn.createSession(1);
         ssn.setSessionListener(new TestSessionListener());
@@ -336,7 +337,7 @@ public class ConnectionTest extends QpidTestCase implements SessionListener
         startServer();
 
         Connection conn = new Connection();
-        conn.setConnectionDelegate(new ClientDelegate(new ConnectionSettings()));
+        conn.setConnectionDelegate(new ClientDelegate(getConnectionSettings()));
         conn.addConnectionListener(new FailoverConnectionListener());
         conn.connect("localhost", port, null, "guest", "guest", false, null);
         Session ssn = conn.createSession(1);
@@ -359,7 +360,7 @@ public class ConnectionTest extends QpidTestCase implements SessionListener
         startServer();
 
         Connection conn = new Connection();
-        conn.setConnectionDelegate(new ClientDelegate(new ConnectionSettings()));
+        conn.setConnectionDelegate(new ClientDelegate(getConnectionSettings()));
         conn.connect("localhost", port, null, "guest", "guest", false, null);
         Session ssn = conn.createSession();
         ssn.sessionFlush(EXPECTED);
@@ -373,7 +374,7 @@ public class ConnectionTest extends QpidTestCase implements SessionListener
     {
         startServer();
         Connection conn = new Connection();
-        conn.setConnectionDelegate(new ClientDelegate(new ConnectionSettings()));
+        conn.setConnectionDelegate(new ClientDelegate(getConnectionSettings()));
         conn.connect("localhost", port, null, "guest", "guest", false, null);
         conn.connectionHeartbeat();
         conn.close();
@@ -384,7 +385,7 @@ public class ConnectionTest extends QpidTestCase implements SessionListener
         startServer();
 
         Connection conn = new Connection();
-        conn.setConnectionDelegate(new ClientDelegate(new ConnectionSettings()));
+        conn.setConnectionDelegate(new ClientDelegate(getConnectionSettings()));
         conn.connect("localhost", port, null, "guest", "guest", false, null);
         Session ssn = conn.createSession();
         send(ssn, "EXCP 0");
@@ -404,7 +405,7 @@ public class ConnectionTest extends QpidTestCase implements SessionListener
         startServer();
 
         Connection conn = new Connection();
-        conn.setConnectionDelegate(new ClientDelegate(new ConnectionSettings()));
+        conn.setConnectionDelegate(new ClientDelegate(getConnectionSettings()));
         conn.connect("localhost", port, null, "guest", "guest", false, null);
         Session ssn = conn.createSession();
         send(ssn, "EXCP 0", true);
@@ -452,5 +453,10 @@ public class ConnectionTest extends QpidTestCase implements SessionListener
             s.processed(xfr);
         }
         public void closed(Session s) {}
+    }
+    
+    ConnectionSettings getConnectionSettings()
+    {
+        return new DefaultConnectionSettingsImpl("localhost", port, null, "guest", "guest", false, "ANONYMOUSE", null);
     }
 }
