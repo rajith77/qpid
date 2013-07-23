@@ -430,7 +430,7 @@ public class AMQConnectionDelegate_0_10 implements AMQConnectionDelegate, Connec
 
     private ConnectionSettings retrieveConnectionSettings(BrokerDetails brokerDetail)
     {
-        ConnectionSettings conSettings = brokerDetail.buildConnectionSettings();
+        AMQConnectionSettingsImpl conSettings = (AMQConnectionSettingsImpl)brokerDetail.buildConnectionSettings();
 
         conSettings.setVhost(_conn.getVirtualHost());
         conSettings.setUsername(_conn.getUsername());

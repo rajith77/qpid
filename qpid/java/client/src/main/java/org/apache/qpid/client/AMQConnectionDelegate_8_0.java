@@ -98,7 +98,7 @@ public class AMQConnectionDelegate_8_0 implements AMQConnectionDelegate
         final Set<AMQState> openOrClosedStates =
                 EnumSet.of(AMQState.CONNECTION_OPEN, AMQState.CONNECTION_CLOSED);
 
-        ConnectionSettings settings = brokerDetail.buildConnectionSettings();
+        AMQConnectionSettingsImpl settings = (AMQConnectionSettingsImpl)brokerDetail.buildConnectionSettings();
         settings.setProtocol(brokerDetail.getTransport());
 
         //Check connection-level ssl override setting

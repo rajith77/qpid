@@ -245,7 +245,7 @@ public class AMQBrokerDetails implements BrokerDetails
         _options.put(key, value);
     }
 
-    private int lookupConnectTimeout()
+    public int lookupConnectTimeout()
     {
         if (_options.containsKey(OPTIONS_CONNECT_TIMEOUT))
         {
@@ -389,7 +389,7 @@ public class AMQBrokerDetails implements BrokerDetails
 
     public ConnectionSettings buildConnectionSettings()
     {
-        ConnectionSettings conSettings = new ConnectionSettings();
+        AMQConnectionSettingsImpl conSettings = new AMQConnectionSettingsImpl();
 
         conSettings.setHost(getHost());
         conSettings.setPort(getPort());
