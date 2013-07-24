@@ -129,12 +129,12 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         _failoverManager.init(this);
     }
 
-    public void connect(ConnectionSettings conSettings) throws JMSException
+    public void connect(ConnectionSettings settings) throws JMSException
     {
         if (_logger.isDebugEnabled())
         {
-            _logger.debug("Attempting connection to host: " + conSettings.getHost() + " port: " + conSettings.getPort()
-                    + " vhost: " + conSettings.getVhost() + " username: " + conSettings.getUsername());
+            _logger.debug("Attempting connection to host: " + settings.getHost() + " port: " + settings.getPort()
+                    + " vhost: " + settings.getVhost() + " username: " + settings.getUsername());
         }
 
         synchronized (_lock)
@@ -144,9 +144,14 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 _state = State.STOPPED;
                 try
                 {
+                    _amqpConnection.setConnectionDelegate(new ClientConnectionDelegate(settings, _config.getURL()));
+                    _amqpConnection.connect(settings);
+                    if (_logger.isDebugEnabled())
+                    {
+                        _logger.debug("Successfully connected to host : " + settings.getHost() + " port: "
+                                + settings.getPort());
+                    }
 
-                    _amqpConnection.setConnectionDelegate(new ClientConnectionDelegate(conSettings, _config.getURL()));
-                    _amqpConnection.connect(conSettings);
                 }
                 catch (ProtocolVersionException pe)
                 {

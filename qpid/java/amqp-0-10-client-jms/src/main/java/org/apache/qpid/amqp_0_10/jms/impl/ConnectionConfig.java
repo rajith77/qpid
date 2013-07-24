@@ -20,17 +20,8 @@
  */
 package org.apache.qpid.amqp_0_10.jms.impl;
 
-import java.util.HashMap;
-import java.util.Map;
-
-import javax.jms.JMSException;
-
-import org.apache.qpid.client.AMQBrokerDetails;
 import org.apache.qpid.client.AMQConnectionURL;
 import org.apache.qpid.configuration.ClientProperties;
-import org.apache.qpid.jms.BrokerDetails;
-import org.apache.qpid.properties.ConnectionStartProperties;
-import org.apache.qpid.transport.ConnectionSettings;
 import org.apache.qpid.transport.util.Logger;
 
 /**
@@ -67,22 +58,6 @@ public class ConnectionConfig
         // TODO if connection property not null return that else, get the
         // default.
         return Integer.getInteger(ClientProperties.QPID_DISPATCHER_COUNT, ClientProperties.DEFAULT_DISPATCHER_COUNT);
-    }
-
-    public ConnectionSettings retrieveConnectionSettings(BrokerDetails broker)
-    {
-        // Pass client name from connection URL
-        Map<String, Object> clientProps = new HashMap<String, Object>();
-        try
-        {
-            clientProps.put(ConnectionStartProperties.CLIENT_ID_0_10, _conn.getClientID());
-        }
-        catch (JMSException e)
-        {
-        }
-
-        ConnectionSettings conSettings = new ConnectionSettingsImpl(_url, (AMQBrokerDetails) broker, clientProps);
-        return conSettings;
     }
 
     /*
