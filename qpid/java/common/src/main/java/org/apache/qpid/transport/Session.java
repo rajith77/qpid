@@ -83,14 +83,14 @@ public class Session extends SessionInvoker
 
     public static final int UNLIMITED_CREDIT = 0xFFFFFFFF;
 
-    private Connection connection;
+    protected Connection connection;
     private Binary name;
     private long expiry;
-    private boolean closing;
+    protected boolean closing;
     private int channel;
-    private SessionDelegate delegate;
-    private SessionListener listener = new DefaultSessionListener();
-    private final long timeout = Long.getLong(ClientProperties.QPID_SYNC_OP_TIMEOUT,
+    protected SessionDelegate delegate;
+    protected SessionListener listener = new DefaultSessionListener();
+    protected final long timeout = Long.getLong(ClientProperties.QPID_SYNC_OP_TIMEOUT,
                                         Long.getLong(ClientProperties.AMQJ_DEFAULT_SYNCWRITE_TIMEOUT,
                                                      ClientProperties.DEFAULT_SYNC_OPERATION_TIMEOUT));
     private final long blockedSendTimeout = Long.getLong(ClientProperties.QPID_FLOW_CONTROL_WAIT_FAILURE,
@@ -98,7 +98,7 @@ public class Session extends SessionInvoker
     private long blockedSendReportingPeriod = Long.getLong(ClientProperties.QPID_FLOW_CONTROL_WAIT_NOTIFY_PERIOD,
                                                            ClientProperties.DEFAULT_FLOW_CONTROL_WAIT_NOTIFY_PERIOD);
 
-    private boolean autoSync = false;
+    protected boolean autoSync = false;
 
     private boolean incomingInit;
     // incoming command count
@@ -110,16 +110,16 @@ public class Session extends SessionInvoker
     private int syncPoint;
 
     // outgoing command count
-    private int commandsOut = 0;
+    protected int commandsOut = 0;
     private final int commandLimit = Integer.getInteger("qpid.session.command_limit", 64 * 1024);
-    private Map<Integer,Method> commands = new HashMap<Integer, Method>();
-    private final Object commandsLock = new Object();
+    protected Map<Integer,Method> commands = new HashMap<Integer, Method>();
+    protected final Object commandsLock = new Object();
     private int commandBytes = 0;
     private int byteLimit = Integer.getInteger("qpid.session.byte_limit", 1024*1024);
-    private int maxComplete = commandsOut - 1;
-    private boolean needSync = false;
+    protected int maxComplete = commandsOut - 1;
+    protected boolean needSync = false;
 
-    private State state = NEW;
+    protected State state = NEW;
 
     // transfer flow control
     private volatile boolean flowControl = false;
@@ -569,12 +569,7 @@ public class Session extends SessionInvoker
             int old = maxComplete;
             for (int id = max(maxComplete, lower); le(id, upper); id++)
             {
-                Method m = removeCommand(id);
-                if (m != null)
-                {
-                    commandBytes -= m.getBodySize();
-                    m.complete();
-                }
+                notifyCompletion(id);
             }
             if (le(lower, maxComplete + 1))
             {
@@ -591,12 +586,22 @@ public class Session extends SessionInvoker
         }
     }
 
+    void notifyCompletion(int id)
+    {
+        Method m = removeCommand(id);
+        if (m != null)
+        {
+            commandBytes -= m.getBodySize();
+            m.complete();
+        }
+    }
+    
     void received(Method m)
     {
         m.delegate(this, delegate);
     }
 
-    private void send(Method m)
+    protected void send(Method m)
     {
         m.setChannel(channel);
         connection.send(m);
@@ -669,7 +674,7 @@ public class Session extends SessionInvoker
                     Thread current = Thread.currentThread();
                     if (!current.equals(resumer))
                     {
-                        throw new SessionException
+                        throw new SessionTimeoutException
                             ("timed out waiting for resume to finish");
                     }
                     break;
@@ -685,7 +690,7 @@ public class Session extends SessionInvoker
                         throw new SessionClosedException();
                     }
                 default:
-                    throw new SessionException
+                    throw new SessionTimeoutException
                         (String.format
                          ("timed out waiting for session to become open " +
                           "(state=%s)", state));
@@ -987,7 +992,7 @@ public class Session extends SessionInvoker
             }
             else
             {
-                throw new SessionException(
+                throw new SessionTimeoutException(
                         String.format("%s timed out waiting for result: %s",
                                    Session.this, this));
             }
@@ -1091,18 +1096,8 @@ public class Session extends SessionInvoker
                 state = DETACHED;
             }
 
-            commandsLock.notifyAll();
+            wakeUpWaitingThreads();
 
-            synchronized (results)
-            {
-                for (ResultFuture<?> result : results.values())
-                {
-                    synchronized(result)
-                    {
-                        result.notifyAll();
-                    }
-                }
-            }
             if(state == CLOSED)
             {
                 delegate.closed(this);
@@ -1165,7 +1160,7 @@ public class Session extends SessionInvoker
 
             if (state != OPEN)
             {
-                throw new SessionException("Timed out waiting for Session to open");
+                throw new SessionTimeoutException("Timed out waiting for Session to open");
             }
             break;
         case DETACHED:
@@ -1188,6 +1183,11 @@ public class Session extends SessionInvoker
         //prevent them waiting for timeout for 60 seconds
         //and possibly preventing failover proceeding
         _failoverRequired.set(true);
+        wakeUpWaitingThreads();
+    }
+
+    protected void wakeUpWaitingThreads()
+    {        
         synchronized (commandsLock)
         {
             commandsLock.notifyAll();
@@ -1202,8 +1202,9 @@ public class Session extends SessionInvoker
                 }
             }
         }
-    }
 
+    }
+    
     /**
      * An auxiliary method for test purposes only
      */

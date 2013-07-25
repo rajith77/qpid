@@ -899,6 +899,11 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }        
     }
 
+    void commandCompleted(int id)
+    {
+        _replayQueue.remove(id);
+    }
+    
     private void checkTransactional() throws JMSException
     {
         if (!getTransacted())

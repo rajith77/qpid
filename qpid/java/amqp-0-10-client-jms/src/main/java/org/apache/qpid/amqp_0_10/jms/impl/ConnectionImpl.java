@@ -56,6 +56,9 @@ import org.apache.qpid.client.AMQConnectionURL;
 import org.apache.qpid.client.JmsNotImplementedException;
 import org.apache.qpid.client.transport.ClientConnectionDelegate;
 import org.apache.qpid.configuration.ClientProperties;
+import org.apache.qpid.transport.ClientSession;
+import org.apache.qpid.transport.ClientSessionFactory;
+import org.apache.qpid.transport.ClientSessionListener;
 import org.apache.qpid.transport.ConnectionException;
 import org.apache.qpid.transport.ConnectionListener;
 import org.apache.qpid.transport.ConnectionSettings;
@@ -63,14 +66,13 @@ import org.apache.qpid.transport.MessageTransfer;
 import org.apache.qpid.transport.ProtocolVersionException;
 import org.apache.qpid.transport.SessionDetachCode;
 import org.apache.qpid.transport.SessionException;
-import org.apache.qpid.transport.SessionListener;
 import org.apache.qpid.transport.util.Logger;
 import org.apache.qpid.util.ConditionManager;
 import org.apache.qpid.util.ConditionManagerTimeoutException;
 import org.apache.qpid.util.ExceptionHelper;
 
 public class ConnectionImpl implements Connection, TopicConnection, QueueConnection, ConnectionListener,
-        SessionListener
+        ClientSessionListener
 {
     private static final Logger _logger = Logger.get(ConnectionImpl.class);
 
@@ -122,6 +124,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         _clientId = url.getClientName();
         _amqpConnection = new org.apache.qpid.transport.Connection();
         _amqpConnection.addConnectionListener(this);
+        _amqpConnection.setSessionFactory(new ClientSessionFactory());
         _dispatchManager = new DispatchManagerImpl(this);
         _connectionNumber = CONN_NUMBER_GENERATOR.incrementAndGet();
         _messageFactory = MessageFactorySupport.getMessageFactory(null);
@@ -680,9 +683,12 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     @Override
     public void exception(org.apache.qpid.transport.Session session, SessionException exception)
     {
-        SessionImpl ssn = _sessions.get(session);
-        ssn.setException(exception);
-        // TODO notify session exception via ExceptionListener
+        if (_state != State.CLOSED)
+        {
+            SessionImpl ssn = _sessions.get(session);
+            ssn.setException(exception);
+            // TODO notify session exception via ExceptionListener
+        }
     }
 
     @Override
@@ -700,6 +706,16 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 _logger.warn(e, "Error closing session");
             }
             removeSession(ssn);
+        }
+    }
+
+    @Override
+    public void commandCompleted(ClientSession session, int commandId)
+    {
+        if (_state != State.CLOSED)
+        {
+            SessionImpl ssn = _sessions.get(session);
+            ssn.commandCompleted(commandId);
         }
     }
 
