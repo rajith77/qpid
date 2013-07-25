@@ -21,7 +21,7 @@ public class Test2
      */
     public static void main(String[] args) throws Exception
     {
-        AMQConnectionURL url = new AMQConnectionURL("amqp://guest:guest@test/?failover='roundrobin?cyclecount='1000''&brokerlist='tcp://localhost:5001?retries='10'&connectdelay='1000'&connecttimeout='1000000';tcp://localhost:5002?retries='10'&connectdelay='1'&connecttimeout='1';tcp://localhost:5003?retries='10'&connectdelay='1'&connecttimeout='1''");
+        AMQConnectionURL url = new AMQConnectionURL("amqp://guest:guest@test/?failover='roundrobin?cyclecount='1000''&brokerlist='tcp://localhost:5672?retries='2'&connectdelay='1000';tcp://localhost:6672?retries='2'&connectdelay='1000''");
         ConnectionImpl con = new ConnectionImpl(url);
         
         Session ssn = con.createSession(false, Session.AUTO_ACKNOWLEDGE);
@@ -42,7 +42,10 @@ public class Test2
         });
         
         Object o = new Object();
-        o.wait();
+        synchronized (o)
+        {
+            o.wait();
+        }
     }
 
 }

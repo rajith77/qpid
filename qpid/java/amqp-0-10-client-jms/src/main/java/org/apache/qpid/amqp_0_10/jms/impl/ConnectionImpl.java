@@ -66,6 +66,7 @@ import org.apache.qpid.transport.MessageTransfer;
 import org.apache.qpid.transport.ProtocolVersionException;
 import org.apache.qpid.transport.SessionDetachCode;
 import org.apache.qpid.transport.SessionException;
+import org.apache.qpid.transport.TransportException;
 import org.apache.qpid.transport.util.Logger;
 import org.apache.qpid.util.ConditionManager;
 import org.apache.qpid.util.ConditionManagerTimeoutException;
@@ -143,8 +144,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         synchronized (_lock)
         {
             if (_state == State.UNCONNECTED)
-            {
-                _state = State.STOPPED;
+            {                
                 try
                 {
                     _amqpConnection.setConnectionDelegate(new ClientConnectionDelegate(settings, _config.getURL()));
@@ -154,13 +154,13 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                         _logger.debug("Successfully connected to host : " + settings.getHost() + " port: "
                                 + settings.getPort());
                     }
-
+                    _state = State.STOPPED;
                 }
                 catch (ProtocolVersionException pe)
                 {
                     throw ExceptionHelper.toJMSException("Invalid Protocol Version", pe);
                 }
-                catch (ConnectionException ce)
+                catch (TransportException ce)
                 {
                     String msg = "Cannot connect to broker: " + ce.getMessage();
                     throw ExceptionHelper.toJMSException(msg, ce);
@@ -347,83 +347,94 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     @Override
     public void closed(org.apache.qpid.transport.Connection connection)
-    {
+    {        
         _failoverInProgress.waitUntilFalse();
         _failoverInProgress.setValueAndNotify(true);
         FailoverStatus status = FailoverStatus.SUCCESSFUL;
         JMSException closedException = null;
-        synchronized (_lock)
-        {
-            try
-            {
-                _logger.info("Executing pre failover routine");
-                preFailover();
-            }
-            catch (JMSException e)
-            {
-                _logger.warn("Pre failover failed. Aborting failover", e);
-                closedException = ExceptionHelper.toJMSException("Pre failover failed. Aborting failover", e);
-                status = FailoverStatus.PRE_FAILOVER_FAILED;
-            }
-
-            try
-            {
-
-                _failoverManager.connect();
-            }
-            catch (FailoverUnsuccessfulException e)
-            {
-                _logger.warn("All attempts at reconnection failed. Aborting failover", e);
-                closedException = ExceptionHelper.toJMSException(
-                        "All attempts at reconnection failed. Aborting failover", e);
-                status = FailoverStatus.RECONNECTION_FAILED;
-            }
-
-            try
-            {
-                _logger.info("Reconnection succesfull, Executing post failover routine");
-                postFailover();
-            }
-            catch (JMSException e)
-            {
-                _logger.warn("Post failover failed. Closing the connection", e);
-                closedException = ExceptionHelper.toJMSException("Post failover failed. Closing the connection", e);
-                status = FailoverStatus.POST_FAILOVER_FAILED;
-            }
-
-            _lock.notifyAll();
-        }
-
         try
         {
-            switch (status)
+            synchronized (_lock)
             {
-            case PRE_FAILOVER_FAILED:
-            case RECONNECTION_FAILED:
-            case POST_FAILOVER_FAILED:
+                //TODO I don't think this is needed as the connection is only closed if Failover is unsuccessful. 
+                if (_state == State.CLOSED)
+                {
+                    return;
+                }
 
+                State prevState = _state;
+                _state = State.UNCONNECTED;
                 try
                 {
-                    closeImpl(status == FailoverStatus.POST_FAILOVER_FAILED);
+                    _logger.info("Executing pre failover routine");
+                    preFailover();
                 }
                 catch (JMSException e)
                 {
-                    _logger.warn("Connection close failed", e);
+                    _logger.warn("Pre failover failed. Aborting failover", e);
+                    closedException = ExceptionHelper.toJMSException("Pre failover failed. Aborting failover", e);
+                    status = FailoverStatus.PRE_FAILOVER_FAILED;
                 }
-                if (_exceptionListener != null)
+    
+                try
                 {
-                    _exceptionListener.onException(closedException);
+    
+                    _failoverManager.connect();
                 }
-                break;
-
-            default:
-                _logger.info("Failover succesfull. Connection Ready to be used");
-                break;
+                catch (FailoverUnsuccessfulException e)
+                {
+                    _logger.warn("All attempts at reconnection failed. Aborting failover", e);
+                    closedException = ExceptionHelper.toJMSException(
+                            "All attempts at reconnection failed. Aborting failover", e);
+                    status = FailoverStatus.RECONNECTION_FAILED;
+                }
+    
+                try
+                {
+                    _logger.info("Reconnection succesfull, Executing post failover routine");
+                    postFailover();
+                }
+                catch (JMSException e)
+                {
+                    _logger.warn("Post failover failed. Closing the connection", e);
+                    closedException = ExceptionHelper.toJMSException("Post failover failed. Closing the connection", e);
+                    status = FailoverStatus.POST_FAILOVER_FAILED;
+                }
+    
+                switch (status)
+                {
+                case PRE_FAILOVER_FAILED:
+                case RECONNECTION_FAILED:
+                case POST_FAILOVER_FAILED:
+    
+                    try
+                    {
+                        closeImpl(status == FailoverStatus.POST_FAILOVER_FAILED);
+                    }
+                    catch (JMSException e)
+                    {
+                        _logger.warn("Connection close failed", e);
+                    }
+                    break;
+    
+                default:
+                    _logger.info("Failover succesfull. Connection Ready to be used");
+                    _state = prevState;
+                    break;
+                }
+                _lock.notifyAll();
             }
         }
         finally
         {
             _failoverInProgress.setValueAndNotify(false);
+        }    
+
+        // You don't need to access the state inside the lock as once closed
+        // the state will never change.
+        if (_state == State.CLOSED && _exceptionListener != null)
+        {
+            _exceptionListener.onException(closedException);
         }
     }
 
@@ -697,15 +708,19 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         if (_state != State.CLOSED)
         {
             SessionImpl ssn = _sessions.get(session);
-            try
+            
+            if (ssn != null && ssn.getException() != null)
             {
-                ssn.closeImpl(false, false);
+                try
+                {
+                    ssn.closeImpl(false, false);
+                }
+                catch (JMSException e)
+                {
+                    _logger.warn(e, "Error closing session");
+                }
+                removeSession(ssn);
             }
-            catch (JMSException e)
-            {
-                _logger.warn(e, "Error closing session");
-            }
-            removeSession(ssn);
         }
     }
 

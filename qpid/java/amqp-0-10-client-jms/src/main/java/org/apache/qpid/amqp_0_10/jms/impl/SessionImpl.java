@@ -234,7 +234,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
             if (sendClose)
             {
-                for (TemporaryQueue tempQueue: _tempQueues)
+                for (TemporaryQueue tempQueue : _tempQueues)
                 {
                     tempQueue.deleteQueue(false);
                 }
@@ -310,7 +310,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
 
         System.out.println("SessionImpl.rollback requeList " + requeueList);
-        
+
         try
         {
             _amqpSession.setAutoSync(true);
@@ -888,7 +888,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     {
         try
         {
-            for (MessageTransfer transfer: _replayQueue.values())
+            for (MessageTransfer transfer : _replayQueue.values())
             {
                 _amqpSession.invoke(transfer);
             }
@@ -896,14 +896,19 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         catch (Exception e)
         {
             throw ExceptionHelper.toJMSException("Error replaying messages after failover", e);
-        }        
+        }
     }
 
     void commandCompleted(int id)
     {
         _replayQueue.remove(id);
     }
-    
+
+    SessionException getException()
+    {
+        return _exception;
+    }
+
     private void checkTransactional() throws JMSException
     {
         if (!getTransacted())

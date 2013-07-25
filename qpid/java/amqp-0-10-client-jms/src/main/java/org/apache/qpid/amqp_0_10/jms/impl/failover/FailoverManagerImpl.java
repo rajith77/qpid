@@ -38,7 +38,7 @@ public class FailoverManagerImpl implements FailoverManager
 
     private BrokerList _brokers;
 
-    private boolean connectedOnce = false;
+    private boolean initialConnAttempted = false;
 
     private Broker _currentBroker;
 
@@ -58,13 +58,14 @@ public class FailoverManagerImpl implements FailoverManager
     @Override
     public void connect() throws FailoverUnsuccessfulException
     {
-        if (!connectedOnce)
+        if (!initialConnAttempted)
         {
-            connectedOnce = true;
+            initialConnAttempted = true;
             try
             {
                 connectToBroker(_currentBroker);
                 _logger.warn("Initial Connection Attempt Successfull");
+                return;
             }
             catch (FailoverUnsuccessfulException e)
             {

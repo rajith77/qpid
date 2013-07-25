@@ -30,24 +30,24 @@ import org.apache.qpid.transport.util.Logger;
 public class URLBrokerList implements BrokerList
 {
     private static final Logger _logger = Logger.get(URLBrokerList.class);
-    
+
     private final List<Broker> _brokers;
-    
+
     private final int CYCLE_COUNT;
-    
+
     private int _currentCycleCount = 0;
-    
+
     private int _currentBrokerIndex = 0;
-    
-    URLBrokerList (ConnectionImpl conn)
+
+    URLBrokerList(ConnectionImpl conn)
     {
         int count = conn.getConfig().getURL().getBrokerCount();
         _brokers = new ArrayList<Broker>(count);
-        for (int i=0; i < count; i++)
+        for (int i = 0; i < count; i++)
         {
             _brokers.add(Broker.getBroker(conn, conn.getConfig().getURL().getBrokerDetails(i)));
         }
-        
+
         String cycleOption = conn.getConfig().getURL().getFailoverOption(ConnectionURL.OPTIONS_FAILOVER_CYCLE);
         int cycleCount = 0;
         try
@@ -55,9 +55,9 @@ public class URLBrokerList implements BrokerList
             cycleCount = cycleOption == null ? 0 : Integer.parseInt(cycleOption);
         }
         catch (NumberFormatException e)
-        {            
+        {
             _logger.error(e, "Option 'cyclecount' contains a non integer value in Connection URL : "
-                    + conn.getConfig().getURL());            
+                    + conn.getConfig().getURL());
         }
         CYCLE_COUNT = cycleCount;
     }
@@ -80,7 +80,7 @@ public class URLBrokerList implements BrokerList
         }
         else
         {
-            return _brokers.get(_currentBrokerIndex);
+            return _brokers.get(_currentBrokerIndex++);
         }
     }
 }
