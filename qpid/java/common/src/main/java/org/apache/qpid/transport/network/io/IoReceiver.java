@@ -212,6 +212,8 @@ final class IoReceiver implements Runnable, Closeable
         }
         catch (Throwable t)
         {
+            t.printStackTrace();
+            log.warn(t, "Exception in IoReceiver");
             if (shouldReport(t))
             {
                 receiver.exception(t);
@@ -219,7 +221,6 @@ final class IoReceiver implements Runnable, Closeable
         }
         finally
         {
-            receiver.closed();
             try
             {
                 socket.close();
@@ -228,6 +229,7 @@ final class IoReceiver implements Runnable, Closeable
             {
                 log.warn(e, "Error closing socket");
             }
+            receiver.closed();
         }
     }
 

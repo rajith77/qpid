@@ -145,20 +145,19 @@ public class MessageConsumerImpl implements MessageConsumer
     @Override
     public MessageListener getMessageListener() throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         return _msgListener;
     }
 
     @Override
     public String getMessageSelector() throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         return _selector;
     }
 
     public boolean getNoLocal() throws JMSException
     {
-        checkClosed();
         return _noLocal;
     }
 
@@ -170,7 +169,7 @@ public class MessageConsumerImpl implements MessageConsumer
     @Override
     public void setMessageListener(MessageListener listener) throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         if (_msgListener != null && _session.getConnection().isStarted())
         {
             throw new IllegalStateException("Message delivery is in progress with another listener");
@@ -299,7 +298,7 @@ public class MessageConsumerImpl implements MessageConsumer
         try
         {
             _msgDeliveryInProgress.setValueAndNotify(true);
-            checkClosed();
+            checkPreConditions();
             _syncReceiveThread = Thread.currentThread();
 
             if (_localQueue.isEmpty() && isPrefetchDisabled())
@@ -779,14 +778,14 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private void preSyncReceiveCheck() throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         if (_msgListener != null)
         {
             throw new IllegalStateException("A listener has already been set.");
         }
     }
 
-    private void checkClosed() throws JMSException
+    private void checkPreConditions() throws JMSException
     {
         if (_closed.get())
         {

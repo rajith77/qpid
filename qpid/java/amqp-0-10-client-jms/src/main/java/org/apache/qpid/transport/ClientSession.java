@@ -1,9 +1,11 @@
 package org.apache.qpid.transport;
 
 import static org.apache.qpid.transport.Session.State.CLOSED;
+import static org.apache.qpid.transport.Session.State.OPEN;
 
 import org.apache.qpid.transport.network.Frame;
 import org.apache.qpid.transport.util.Logger;
+import org.apache.qpid.transport.util.Waiter;
 
 /**
  * Failover and replay is removed. The JMS layer handles it. Sync is issued
@@ -64,6 +66,12 @@ public class ClientSession extends Session
             {
                 switch (state)
                 {
+                case NEW:
+                    Waiter w = new Waiter(commandsLock, timeout);
+                    while (w.hasTime() && (state != OPEN && state != CLOSED))
+                    {
+                        w.await();
+                    }
                 case OPEN:
                     break;
                 case CLOSING:

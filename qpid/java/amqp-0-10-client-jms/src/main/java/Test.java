@@ -1,4 +1,4 @@
-package org.apache.qpid.amqp_0_10.jms.impl;
+
 
 import javax.jms.Destination;
 import javax.jms.MessageConsumer;
@@ -7,6 +7,7 @@ import javax.jms.Queue;
 import javax.jms.Session;
 import javax.jms.TextMessage;
 
+import org.apache.qpid.amqp_0_10.jms.impl.ConnectionImpl;
 import org.apache.qpid.client.AMQConnectionURL;
 
 public class Test
@@ -19,7 +20,7 @@ public class Test
 
     public static void basicSendReceive() throws Exception
     {
-        AMQConnectionURL url = new AMQConnectionURL("amqp://username:password@clientid/test?brokerlist='tcp://localhost:5672'");
+        String url = "amqp://username:password@clientid/test?brokerlist='tcp://localhost:5672'";
         ConnectionImpl con = new ConnectionImpl(url);
         
         Session ssn = con.createSession(false, Session.AUTO_ACKNOWLEDGE);
@@ -46,7 +47,7 @@ public class Test
     
     public static void testRollbackOnClose() throws Exception
     {
-        AMQConnectionURL url = new AMQConnectionURL("amqp://username:password@clientid/test?brokerlist='tcp://localhost:5672'");
+        String url = "amqp://username:password@clientid/test?brokerlist='tcp://localhost:5672'";
         ConnectionImpl con = new ConnectionImpl(url);
         con.start();
         

@@ -44,8 +44,8 @@
     <level value="INFO"/>
   </logger>
 
-  <logger name="qpid.protocol">
-    <level value="${amqj.protocol.logging.level}"/>
+  <logger name="org.apache.qpid.transport">
+    <level value="DEBUG"/>
   </logger>
 
   <logger name="org.apache.qpid.test.utils.QpidTestCase">

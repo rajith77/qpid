@@ -68,6 +68,7 @@ import org.apache.qpid.transport.SessionDetachCode;
 import org.apache.qpid.transport.SessionException;
 import org.apache.qpid.transport.TransportException;
 import org.apache.qpid.transport.util.Logger;
+import org.apache.qpid.url.URLSyntaxException;
 import org.apache.qpid.util.ConditionManager;
 import org.apache.qpid.util.ConditionManagerTimeoutException;
 import org.apache.qpid.util.ExceptionHelper;
@@ -119,6 +120,11 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     private volatile ExceptionListener _exceptionListener;
 
+    public ConnectionImpl(String url) throws JMSException, URLSyntaxException
+    {
+        this(new AMQConnectionURL(url));
+    }
+
     protected ConnectionImpl(AMQConnectionURL url) throws JMSException
     {
         _config = new ConnectionConfig(this, url);
@@ -144,7 +150,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         synchronized (_lock)
         {
             if (_state == State.UNCONNECTED)
-            {                
+            {
                 try
                 {
                     _amqpConnection.setConnectionDelegate(new ClientConnectionDelegate(settings, _config.getURL()));
@@ -216,8 +222,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 _failoverManager.connect();
             }
             SessionImpl ssn = new SessionImpl(this, ackMode);
-            _sessions.put(ssn.getAMQPSession(), ssn);
-            _dispatchManager.register(ssn.getAMQPSession());
 
             if (_state == State.STARTED)
             {
@@ -347,7 +351,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     @Override
     public void closed(org.apache.qpid.transport.Connection connection)
-    {        
+    {
         _failoverInProgress.waitUntilFalse();
         _failoverInProgress.setValueAndNotify(true);
         FailoverStatus status = FailoverStatus.SUCCESSFUL;
@@ -356,12 +360,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         {
             synchronized (_lock)
             {
-                //TODO I don't think this is needed as the connection is only closed if Failover is unsuccessful. 
-                if (_state == State.CLOSED)
-                {
-                    return;
-                }
-
                 State prevState = _state;
                 _state = State.UNCONNECTED;
                 try
@@ -375,38 +373,45 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                     closedException = ExceptionHelper.toJMSException("Pre failover failed. Aborting failover", e);
                     status = FailoverStatus.PRE_FAILOVER_FAILED;
                 }
-    
-                try
+
+                if (status == FailoverStatus.SUCCESSFUL)
                 {
-    
-                    _failoverManager.connect();
+                    try
+                    {
+
+                        _failoverManager.connect();
+                    }
+                    catch (FailoverUnsuccessfulException e)
+                    {
+                        _logger.warn("All attempts at reconnection failed. Aborting failover", e);
+                        closedException = ExceptionHelper.toJMSException(
+                                "All attempts at reconnection failed. Aborting failover", e);
+                        status = FailoverStatus.RECONNECTION_FAILED;
+                    }
                 }
-                catch (FailoverUnsuccessfulException e)
+
+                if (status == FailoverStatus.SUCCESSFUL)
                 {
-                    _logger.warn("All attempts at reconnection failed. Aborting failover", e);
-                    closedException = ExceptionHelper.toJMSException(
-                            "All attempts at reconnection failed. Aborting failover", e);
-                    status = FailoverStatus.RECONNECTION_FAILED;
+                    try
+                    {
+                        _logger.info("Reconnection succesfull, Executing post failover routine");
+                        postFailover();
+                    }
+                    catch (JMSException e)
+                    {
+                        _logger.warn("Post failover failed. Closing the connection", e);
+                        closedException = ExceptionHelper.toJMSException(
+                                "Post failover failed. Closing the connection", e);
+                        status = FailoverStatus.POST_FAILOVER_FAILED;
+                    }
                 }
-    
-                try
-                {
-                    _logger.info("Reconnection succesfull, Executing post failover routine");
-                    postFailover();
-                }
-                catch (JMSException e)
-                {
-                    _logger.warn("Post failover failed. Closing the connection", e);
-                    closedException = ExceptionHelper.toJMSException("Post failover failed. Closing the connection", e);
-                    status = FailoverStatus.POST_FAILOVER_FAILED;
-                }
-    
+
                 switch (status)
                 {
                 case PRE_FAILOVER_FAILED:
                 case RECONNECTION_FAILED:
                 case POST_FAILOVER_FAILED:
-    
+
                     try
                     {
                         closeImpl(status == FailoverStatus.POST_FAILOVER_FAILED);
@@ -416,7 +421,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                         _logger.warn("Connection close failed", e);
                     }
                     break;
-    
+
                 default:
                     _logger.info("Failover succesfull. Connection Ready to be used");
                     _state = prevState;
@@ -428,7 +433,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         finally
         {
             _failoverInProgress.setValueAndNotify(false);
-        }    
+        }
 
         // You don't need to access the state inside the lock as once closed
         // the state will never change.
@@ -449,32 +454,37 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 _state = State.CLOSED;
                 _dispatchManager.shutdown();
 
-                for (SessionImpl session : _sessions.values())
+                try
                 {
-                    session.closeImpl(sendClose, false);
-                }
-                _sessions.clear();
+                    for (SessionImpl session : _sessions.values())
+                    {
+                        session.closeImpl(sendClose, false);
+                    }
+                    _sessions.clear();
 
-                if (sendClose)
-                {
-                    removeTempDestinations();
+                    if (sendClose)
+                    {
+                        removeTempDestinations();
+                    }
+                    else
+                    {
+                        _tempQueues.clear();
+                    }
+
+                    for (CloseTask task : _closeTasks)
+                    {
+                        task.onClose();
+                    }
                 }
-                else
+                finally
                 {
-                    _tempQueues.clear();
+                    if (sendClose && _amqpConnection != null && _state != State.UNCONNECTED)
+                    {
+                        _amqpConnection.close();
+                    }
                 }
 
-                for (CloseTask task : _closeTasks)
-                {
-                    task.onClose();
-                }
-
-                if (sendClose && _amqpConnection != null && _state != State.UNCONNECTED)
-                {
-                    _amqpConnection.close();
-                }
             }
-
             _lock.notifyAll();
         }
     }
@@ -503,12 +513,25 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         return _amqpConnection;
     }
 
-    void removeSession(SessionImpl ssn)
+    void addSession(SessionImpl session)
     {
         synchronized (_lock)
         {
-            _sessions.remove(ssn);
-            _dispatchManager.unregister(ssn.getAMQPSession());
+            _sessions.put(session.getAMQPSession(), session);
+            _dispatchManager.register(session.getAMQPSession());
+        }
+    }
+
+    void removeSession(SessionImpl session)
+    {
+        synchronized (_lock)
+        {
+            org.apache.qpid.transport.Session ssn = session.getAMQPSession();
+            if (ssn != null)
+            {
+                _sessions.remove(ssn);
+                _dispatchManager.unregister(ssn);
+            }
         }
     }
 
@@ -708,9 +731,10 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         if (_state != State.CLOSED)
         {
             SessionImpl ssn = _sessions.get(session);
-            
+
             if (ssn != null && ssn.getException() != null)
             {
+                removeSession(ssn);
                 try
                 {
                     ssn.closeImpl(false, false);
@@ -719,7 +743,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 {
                     _logger.warn(e, "Error closing session");
                 }
-                removeSession(ssn);
             }
         }
     }
@@ -730,7 +753,10 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         if (_state != State.CLOSED)
         {
             SessionImpl ssn = _sessions.get(session);
-            ssn.commandCompleted(commandId);
+            if (ssn != null)
+            {
+                ssn.commandCompleted(commandId);
+            }
         }
     }
 

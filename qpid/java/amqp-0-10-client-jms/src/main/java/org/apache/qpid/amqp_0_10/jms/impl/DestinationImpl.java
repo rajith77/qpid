@@ -60,6 +60,12 @@ public class DestinationImpl implements Destination
         return obj != null && obj.getClass() == getClass() && _address.equals(((DestinationImpl) obj)._address);
     }
 
+    @Override
+    public String toString()
+    {
+        return _address.toString();
+    }
+
     public static synchronized DestinationImpl createDestination(final String address) throws JMSException
     {
         DestinationImpl destination = DESTINATION_CACHE.get(address);

@@ -167,29 +167,45 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private void createProtocolSession() throws JMSException
     {
+        System.out.println("================================");
+        System.out.println("Creating session " + _ackMode);  
+        System.out.println("================================");
         try
         {
+            // Remove any old associations if present.
+            _conn.removeSession(this);
             _amqpSession = _conn.getAMQPConnection().createSession(1);
+            _conn.addSession(this);
         }
         catch (ConnectionException ce)
         {
-            ExceptionHelper.toJMSException("Error creating protocol session", ce);
+            throw ExceptionHelper.toJMSException("Error creating protocol session", ce);
         }
-
-        _amqpSession.setSessionListener(_conn);
 
         try
         {
+            System.out.println("================================");
+            System.out.println("Going to mark session transacted");  
+            System.out.println("================================");
             if (_ackMode == AcknowledgeMode.TRANSACTED)
             {
                 _amqpSession.txSelect();
                 _amqpSession.setTransacted(true);
+                System.out.println("================================");
+                System.out.println("Marked session transacted");  
+                System.out.println("================================");
             }
         }
         catch (SessionException se)
         {
-            ExceptionHelper.toJMSException("Error marking protocol session as transacted", se);
+            throw ExceptionHelper.toJMSException("Error marking protocol session as transacted", se);
         }
+
+        System.out.println("================================");
+        System.out.println("Finish session creation");  
+        System.out.println("================================");
+
+        _amqpSession.setSessionListener(_conn);
     }
 
     @Override
@@ -518,6 +534,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public MessageProducer createProducer(Destination dest) throws JMSException
     {
+        checkPreConditions();
         verifyDestination(dest, true);
         MessageProducerImpl prod = new MessageProducerImpl(this, (DestinationImpl) dest);
         _producers.add(prod);
@@ -539,6 +556,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public MessageConsumer createConsumer(Destination dest, String selector, boolean noLocal) throws JMSException
     {
+        checkPreConditions();
         verifyDestination(dest, false);
         String tag = String.valueOf(_consumerId.incrementAndGet());
         MessageConsumerImpl cons = new MessageConsumerImpl(tag, this, (DestinationImpl) dest, selector, noLocal, false,
@@ -563,6 +581,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     public TopicSubscriber createDurableSubscriber(Topic topic, String name, String selector, boolean noLocal)
             throws JMSException
     {
+        checkPreConditions();
         verifyTopic(topic, false);
         if (_durableSubs.containsKey(name))
         {
@@ -598,6 +617,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public void unsubscribe(String name) throws JMSException
     {
+        checkPreConditions();
         if (_durableSubs.containsKey(name))
         {
             _durableSubs.get(name).close();
@@ -618,6 +638,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public QueueBrowser createBrowser(Queue queue, String selector) throws JMSException
     {
+        checkPreConditions();
         // TODO Auto-generated method stub
         verifyQueue(queue, false);
         return null;
@@ -626,6 +647,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public TopicPublisher createPublisher(Topic topic) throws JMSException
     {
+        checkPreConditions();
         verifyTopic(topic, true);
         TopicPublisherImpl prod = new TopicPublisherImpl(this, (TopicImpl) topic);
         _producers.add(prod);
@@ -641,6 +663,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public TopicSubscriber createSubscriber(Topic topic, String selector, boolean noLocal) throws JMSException
     {
+        checkPreConditions();
         verifyTopic(topic, false);
         String tag = String.valueOf(_consumerId.incrementAndGet());
         TopicSubscriberImpl cons = new TopicSubscriberImpl(tag, this, (TopicImpl) topic, selector, noLocal, false,
@@ -664,6 +687,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public QueueReceiver createReceiver(Queue queue, String selector) throws JMSException
     {
+        checkPreConditions();
         verifyQueue(queue, false);
         String tag = String.valueOf(_consumerId.incrementAndGet());
         QueueReceiverImpl cons = new QueueReceiverImpl(tag, this, (QueueImpl) queue, selector, false, false, _ackMode);
@@ -680,6 +704,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public QueueSender createSender(Queue queue) throws JMSException
     {
+        checkPreConditions();
         verifyQueue(queue, true);
         QueueSenderImpl prod = new QueueSenderImpl(this, (QueueImpl) queue);
         _producers.add(prod);
@@ -689,24 +714,28 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public Message createMessage() throws JMSException
     {
+        checkPreConditions();
         return _messageFactory.createMessage();
     }
 
     @Override
     public BytesMessage createBytesMessage() throws JMSException
     {
+        checkPreConditions();
         return _messageFactory.createBytesMessage();
     }
 
     @Override
     public TextMessage createTextMessage() throws JMSException
     {
+        checkPreConditions();
         return _messageFactory.createTextMessage();
     }
 
     @Override
     public TextMessage createTextMessage(String txt) throws JMSException
     {
+        checkPreConditions();
         TextMessage msg = createTextMessage();
         msg.setText(txt);
         return msg;
@@ -715,18 +744,21 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public MapMessage createMapMessage() throws JMSException
     {
+        checkPreConditions();
         return _messageFactory.createMapMessage();
     }
 
     @Override
     public ObjectMessage createObjectMessage() throws JMSException
     {
+        checkPreConditions();
         return _messageFactory.createObjectMessage();
     }
 
     @Override
     public ObjectMessage createObjectMessage(Serializable serilizable) throws JMSException
     {
+        checkPreConditions();
         ObjectMessage msg = createObjectMessage();
         msg.setObject(serilizable);
         return msg;
@@ -735,18 +767,21 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public StreamMessage createStreamMessage() throws JMSException
     {
+        checkPreConditions();
         return _messageFactory.createStreamMessage();
     }
 
     @Override
     public Queue createQueue(String queue) throws JMSException
     {
+        checkPreConditions();
         return new QueueImpl(queue);
     }
 
     @Override
     public javax.jms.TemporaryQueue createTemporaryQueue() throws JMSException
     {
+        checkPreConditions();
         TemporaryQueueImpl queue = new TemporaryQueueImpl(this);
         _tempQueues.add(queue);
         return queue;
@@ -755,12 +790,14 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public TemporaryTopic createTemporaryTopic() throws JMSException
     {
+        checkPreConditions();
         return new TemporaryTopicImpl(this);
     }
 
     @Override
     public Topic createTopic(String topic) throws JMSException
     {
+        checkPreConditions();
         return new TopicImpl(topic);
     }
 
@@ -843,17 +880,20 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     void sendAcknowledgements(RangeSet rangeSet, boolean sync) throws JMSException
     {
-        try
+        if (rangeSet.size() > 0)
         {
-            _amqpSession.messageAccept(rangeSet);
-            if (sync)
+            try
             {
-                _amqpSession.sync();
+                _amqpSession.messageAccept(rangeSet);
+                if (sync)
+                {
+                    _amqpSession.sync();
+                }
             }
-        }
-        catch (Exception e)
-        {
-            throw ExceptionHelper.toJMSException("Exception when trying to send message accepts", e);
+            catch (Exception e)
+            {
+                throw ExceptionHelper.toJMSException("Exception when trying to send message accepts", e);
+            }
         }
     }
 

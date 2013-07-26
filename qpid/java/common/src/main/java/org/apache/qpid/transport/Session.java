@@ -128,7 +128,7 @@ public class Session extends SessionInvoker
     private Thread resumer = null;
     private boolean transacted = false;
     private SessionDetachCode detachCode;
-    private final Object stateLock = new Object();
+    protected final Object stateLock = new Object();
 
     private final AtomicBoolean _failoverRequired = new AtomicBoolean(false);
     private boolean _isNoReplay = false;
@@ -834,7 +834,7 @@ public class Session extends SessionInvoker
 
     protected boolean shouldIssueFlush(int next)
     {
-        return (next % 65536) == 0;
+        return next == 0 ? false : (next % 65536) == 0;
     }
 
     public void sync()
@@ -876,7 +876,11 @@ public class Session extends SessionInvoker
                 else
                 {
                     ExecutionException ee = getException();
-                    if (ee != null)
+                    if (ee == null)
+                    {
+                        throw new SessionClosedException();
+                    }
+                    else
                     {
                         throw new SessionException(ee);
                     }

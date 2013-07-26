@@ -47,6 +47,7 @@ import org.apache.qpid.transport.MessageDeliveryPriority;
 import org.apache.qpid.transport.MessageProperties;
 import org.apache.qpid.transport.MessageTransfer;
 import org.apache.qpid.transport.ReplyTo;
+import org.apache.qpid.transport.SessionClosedException;
 import org.apache.qpid.transport.util.Logger;
 import org.apache.qpid.util.ConditionManager;
 import org.apache.qpid.util.ExceptionHelper;
@@ -227,6 +228,7 @@ public class MessageProducerImpl implements MessageProducer
         }
         else
         {
+            isForeignMsg = true;
             message = convertToNativeMessage(msg);
         }
 
@@ -276,7 +278,7 @@ public class MessageProducerImpl implements MessageProducer
             _msgSenderStopped.waitUntilFalse();
             _msgSendingInProgress.setValueAndNotify(true);
             // Check right before we send.
-            checkClosed();
+            checkPreConditions();
 
             ByteBuffer buffer = data == null ? ByteBuffer.allocate(0) : data.slice();
 
@@ -284,8 +286,19 @@ public class MessageProducerImpl implements MessageProducer
                     MessageAcquireMode.PRE_ACQUIRED, new Header(deliveryProps, messageProps), buffer, sync ? SYNC
                             : NONE);
 
-            _session.getAMQPSession().invoke(transfer);
-            _count++;
+            try
+            {
+                _session.getAMQPSession().invoke(transfer);
+                _count++;
+            }
+            catch (SessionClosedException e)
+            {
+                //Thrown when the session is detached. Otherwise a regular SessionException
+                // is thrown with the ExecutionException linked to it.
+                checkPreConditions();
+                _session.getAMQPSession().invoke(transfer);
+                _count++;
+            }
 
             if (sync || _count >= _capacity)
             {
@@ -315,49 +328,49 @@ public class MessageProducerImpl implements MessageProducer
     @Override
     public int getDeliveryMode() throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         return _deliveryMode.getValue();
     }
 
     @Override
     public DestinationImpl getDestination() throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         return _dest;
     }
 
     @Override
     public boolean getDisableMessageID() throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         return _disableMessageId;
     }
 
     @Override
     public boolean getDisableMessageTimestamp() throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         return _disableTimestamp;
     }
 
     @Override
     public int getPriority() throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         return _priority.getValue();
     }
 
     @Override
     public long getTimeToLive() throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         return _ttl;
     }
 
     @Override
     public void setDeliveryMode(int deliveryMode) throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         _deliveryMode = MessageDeliveryMode.get((short) deliveryMode);
         _syncPublish = getSyncPublish();
     }
@@ -365,28 +378,28 @@ public class MessageProducerImpl implements MessageProducer
     @Override
     public void setDisableMessageID(boolean b) throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         _disableMessageId = b;
     }
 
     @Override
     public void setDisableMessageTimestamp(boolean b) throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         _disableTimestamp = b;
     }
 
     @Override
     public void setPriority(int priority) throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         _priority = MessageDeliveryPriority.get((short) priority);
     }
 
     @Override
     public void setTimeToLive(long ttl) throws JMSException
     {
-        checkClosed();
+        checkPreConditions();
         _ttl = ttl;
     }
 
@@ -441,7 +454,7 @@ public class MessageProducerImpl implements MessageProducer
         _msgSendingInProgress.waitUntilFalse();
     }
 
-    private void checkClosed() throws JMSException
+    private void checkPreConditions() throws JMSException
     {
         if (_closed.get())
         {

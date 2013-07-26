@@ -117,6 +117,7 @@ public class FailoverManagerImpl implements FailoverManager
             else
             {
                 _currentBroker = getNextBrokerToConnect();
+                _currentBrokerRetries = 0;
                 connect();
             }
         }

@@ -76,7 +76,6 @@ public class DispatchManagerImpl implements DispatchManager<Session>
             dispatcher.signalDispatcherToStop();
             dispatcher.waitForDispatcherToStop();
             dispatcher.drainQueue(key);
-            dispatcher.signalDispatcherToStart();
         }
     }
 
@@ -150,7 +149,10 @@ public class DispatchManagerImpl implements DispatchManager<Session>
         if (!_closed.get())
         {
             Dispatcher<Session> dispatcher = _dispatcherMap.get(key);
-            dispatcher.signalDispatcherToStart();
+            if (dispatcher != null)
+            {
+                dispatcher.signalDispatcherToStart();
+            }
         }
     }
 

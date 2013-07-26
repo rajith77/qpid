@@ -1,4 +1,4 @@
-package org.apache.qpid.amqp_0_10.jms.impl;
+
 
 import javax.jms.Destination;
 import javax.jms.Message;
@@ -6,6 +6,7 @@ import javax.jms.MessageConsumer;
 import javax.jms.MessageListener;
 import javax.jms.Session;
 
+import org.apache.qpid.amqp_0_10.jms.impl.ConnectionImpl;
 import org.apache.qpid.client.AMQConnectionURL;
 
 public class Test2
@@ -21,7 +22,7 @@ public class Test2
      */
     public static void main(String[] args) throws Exception
     {
-        AMQConnectionURL url = new AMQConnectionURL("amqp://guest:guest@test/?failover='roundrobin?cyclecount='1000''&brokerlist='tcp://localhost:5672?retries='2'&connectdelay='1000';tcp://localhost:6672?retries='2'&connectdelay='1000''");
+        String url = "amqp://username:password@clientid/test?brokerlist='tcp://localhost:5672'";
         ConnectionImpl con = new ConnectionImpl(url);
         
         Session ssn = con.createSession(false, Session.AUTO_ACKNOWLEDGE);
