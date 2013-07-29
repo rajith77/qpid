@@ -80,9 +80,6 @@ public class SessionDelegate
 
     @Override public void sessionAttached(Session ssn, SessionAttached atc)
     {
-        System.out.println("================================");
-        System.out.println("sessionAttached " + atc);  
-        System.out.println("================================");
         ssn.setState(Session.State.OPEN);
         synchronized (ssn.getStateLock())
         {

@@ -141,6 +141,11 @@ public class Connection extends ConnectionInvoker
         listeners.add(listener);
     }
 
+    public void removeConnectionListener(ConnectionListener listener)
+    {
+        listeners.add(listener);
+    }
+
     public Sender<ProtocolEvent> getSender()
     {
         return sender;

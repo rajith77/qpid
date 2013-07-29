@@ -65,23 +65,26 @@ public class Dispatcher<K> implements Runnable
         try
         {
             _dispatcherShutdown.setValueAndNotify(false);
-            
+
             while (_continue.get())
             {
                 if (_stopped.get())
                 {
                     _dispatcherStarted.setValueAndNotify(false);
-                    System.out.println("XXXXXXXXXXXXXXXXX Stopped true, Value of _dispatcherStarted=" + _dispatcherStarted.getCurrentValue());
+                    System.out.println("XXXXXXXXXXXXXXXXX Stopped true, Value of _dispatcherStarted="
+                            + _dispatcherStarted.getCurrentValue());
                 }
-                
+
                 _dispatcherStarted.waitUntilTrue();
-                
+
                 if (!_stopped.get())
                 {
                     try
                     {
-                        System.out.println("XXXXXXXXXXXXXXXXX going take message and dispatch, value of _dispatcherStarted=" + _dispatcherStarted.getCurrentValue());
-                        _dispatchQueue.take().dispatch();                    
+                        System.out
+                                .println("XXXXXXXXXXXXXXXXX going take message and dispatch, value of _dispatcherStarted="
+                                        + _dispatcherStarted.getCurrentValue());
+                        _dispatchQueue.take().dispatch();
                     }
                     catch (InterruptedException e)
                     {
@@ -89,13 +92,14 @@ public class Dispatcher<K> implements Runnable
                         // continue
                     }
                 }
-                
+
             }
         }
         finally
         {
             _dispatcherShutdown.setValueAndNotify(true);
-            System.out.println("XXXXXXXXXXXXXXXXX _dispatcherShutdown notified true, value of _dispatcherShutdown=" + _dispatcherShutdown.getCurrentValue());
+            System.out.println("XXXXXXXXXXXXXXXXX _dispatcherShutdown notified true, value of _dispatcherShutdown="
+                    + _dispatcherShutdown.getCurrentValue());
         }
     }
 
@@ -132,6 +136,11 @@ public class Dispatcher<K> implements Runnable
     public void waitForDispatcherToStop()
     {
         _dispatcherStarted.waitUntilFalse();
+    }
+
+    public boolean isDispatcherStopped()
+    {
+        return _stopped.get() && (!_dispatcherStarted.getCurrentValue());
     }
 
     public void drainQueue(K key)

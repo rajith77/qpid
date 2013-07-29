@@ -129,9 +129,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     {
         _config = new ConnectionConfig(this, url);
         _clientId = url.getClientName();
-        _amqpConnection = new org.apache.qpid.transport.Connection();
-        _amqpConnection.addConnectionListener(this);
-        _amqpConnection.setSessionFactory(new ClientSessionFactory());
         _dispatchManager = new DispatchManagerImpl(this);
         _connectionNumber = CONN_NUMBER_GENERATOR.incrementAndGet();
         _messageFactory = MessageFactorySupport.getMessageFactory(null);
@@ -153,6 +150,9 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             {
                 try
                 {
+                    _amqpConnection = new org.apache.qpid.transport.Connection();
+                    _amqpConnection.addConnectionListener(this);
+                    _amqpConnection.setSessionFactory(new ClientSessionFactory());
                     _amqpConnection.setConnectionDelegate(new ClientConnectionDelegate(settings, _config.getURL()));
                     _amqpConnection.connect(settings);
                     if (_logger.isDebugEnabled())
@@ -194,29 +194,28 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     @Override
     public Session createSession(boolean transacted, int acknowledgeMode) throws JMSException
     {
-        int ackMode = transacted ? Session.SESSION_TRANSACTED : acknowledgeMode;
-        return createSession(ackMode);
+        return createSessionImpl(transacted, acknowledgeMode);
     }
 
     @Override
     public QueueSession createQueueSession(boolean transacted, int acknowledgeMode) throws JMSException
     {
-        int ackMode = transacted ? Session.SESSION_TRANSACTED : acknowledgeMode;
-        return createSession(ackMode);
+        return createSessionImpl(transacted, acknowledgeMode);
     }
 
     @Override
     public TopicSession createTopicSession(boolean transacted, int acknowledgeMode) throws JMSException
     {
-        int ackMode = transacted ? Session.SESSION_TRANSACTED : acknowledgeMode;
-        return createSession(ackMode);
+
+        return createSessionImpl(transacted, acknowledgeMode);
     }
 
-    private SessionImpl createSession(int ackMode) throws JMSException
+    private SessionImpl createSessionImpl(boolean transacted, int acknowledgeMode) throws JMSException
     {
         checkClosed();
         synchronized (_lock)
         {
+            int ackMode = transacted ? Session.SESSION_TRANSACTED : acknowledgeMode;
             if (_state == State.UNCONNECTED)
             {
                 _failoverManager.connect();
@@ -378,8 +377,8 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 {
                     try
                     {
-
                         _failoverManager.connect();
+                        _state = prevState; // either START or STOPPED
                     }
                     catch (FailoverUnsuccessfulException e)
                     {
@@ -423,8 +422,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                     break;
 
                 default:
-                    _logger.info("Failover succesfull. Connection Ready to be used");
-                    _state = prevState;
+                    _logger.info("Failover succesfull. Connection Ready to be used");                    
                     break;
                 }
                 _lock.notifyAll();

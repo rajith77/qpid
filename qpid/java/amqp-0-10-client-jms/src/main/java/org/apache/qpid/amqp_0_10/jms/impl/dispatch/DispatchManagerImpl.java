@@ -174,8 +174,11 @@ public class DispatchManagerImpl implements DispatchManager<Session>
             System.out.println("Stop Dispatcher : " + _dispatcherMap);
             if (dispatcher != null)
             {
-                dispatcher.signalDispatcherToStop();
-                dispatcher.waitForDispatcherToStop();
+                if (!dispatcher.isDispatcherStopped())
+                {
+                    dispatcher.signalDispatcherToStop();
+                    dispatcher.waitForDispatcherToStop();
+                }
             }
         }
     }
@@ -187,9 +190,11 @@ public class DispatchManagerImpl implements DispatchManager<Session>
         {
             for (Dispatcher<Session> dispatcher : _dispatchers)
             {
-                dispatcher.signalDispatcherToStop();
-                dispatcher.interrupt();
-                dispatcher.waitForDispatcherToStop();
+                if (!dispatcher.isDispatcherStopped())
+                {
+                    dispatcher.signalDispatcherToStop();
+                    dispatcher.waitForDispatcherToStop();
+                }
             }
         }
     }

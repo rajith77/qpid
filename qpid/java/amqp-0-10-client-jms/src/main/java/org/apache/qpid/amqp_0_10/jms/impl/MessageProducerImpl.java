@@ -276,9 +276,9 @@ public class MessageProducerImpl implements MessageProducer
         try
         {
             _msgSenderStopped.waitUntilFalse();
-            _msgSendingInProgress.setValueAndNotify(true);
             // Check right before we send.
             checkPreConditions();
+            _msgSendingInProgress.setValueAndNotify(true);
 
             ByteBuffer buffer = data == null ? ByteBuffer.allocate(0) : data.slice();
 
@@ -293,9 +293,12 @@ public class MessageProducerImpl implements MessageProducer
             }
             catch (SessionClosedException e)
             {
-                //Thrown when the session is detached. Otherwise a regular SessionException
+                // Thrown when the session is detached. Otherwise a regular
+                // SessionException
                 // is thrown with the ExecutionException linked to it.
+                _msgSendingInProgress.setValueAndNotify(false);
                 checkPreConditions();
+                _msgSendingInProgress.setValueAndNotify(true);
                 _session.getAMQPSession().invoke(transfer);
                 _count++;
             }
@@ -401,6 +404,13 @@ public class MessageProducerImpl implements MessageProducer
     {
         checkPreConditions();
         _ttl = ttl;
+    }
+
+    @Override
+    public String toString()
+    {
+        return "Sender: send-in-progress:" + _msgSendingInProgress.getCurrentValue() + ", sender-stopped:"
+                + _msgSenderStopped.getCurrentValue() + ", Dest:" + _dest.getAddress();
     }
 
     void stopMessageSender()

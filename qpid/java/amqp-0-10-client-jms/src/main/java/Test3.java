@@ -1,5 +1,8 @@
 
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import javax.jms.ExceptionListener;
 import javax.jms.JMSException;
 import javax.jms.Message;
 import javax.jms.MessageConsumer;
@@ -13,11 +16,20 @@ import org.apache.qpid.amqp_0_10.jms.impl.ConnectionImpl;
 public class Test3
 {
     ConnectionImpl _con;
+    AtomicBoolean _continue = new AtomicBoolean(true);
     
     public Test3() throws Exception
     {
-        String url = "amqp://username:password@clientid/test?brokerlist='tcp://localhost:5672;tcp://localhost:6672'";
+        String url = "amqp://username:password@clientid/test?failover='roundrobin?cyclecount='0''&brokerlist='tcp://localhost:5672;tcp://localhost:6672'";
         _con = new ConnectionImpl(url);
+        _con.setExceptionListener(new ExceptionListener(){
+
+            @Override
+            public void onException(JMSException arg0)
+            {
+                _continue.set(false);
+                
+            }});
         _con.start();
         
         final Session ssn = _con.createSession(true, Session.SESSION_TRANSACTED);
@@ -48,12 +60,20 @@ public class Test3
         {
             int count = 0;
             Session ssn = _con.createSession(true, Session.SESSION_TRANSACTED);
-            MessageProducer prod = ssn.createProducer(ssn.createQueue("MY_QUEUE"));
-            while (true)
+            MessageProducer prod = ssn.createProducer(ssn.createQueue("MY_QUEUE;{create: always}"));
+            while (_continue.get())
             {
-                prod.send(ssn.createTextMessage("Msg" + count++));
-                ssn.commit();
-                System.out.println("Sent Msg" + count);
+                try
+                {
+                    prod.send(ssn.createTextMessage("Msg" + count));
+                    ssn.commit();
+                    System.out.println("Sent Msg" + count);
+                    count++;
+                }
+                catch (JMSException e)
+                {
+                    e.printStackTrace();
+                }
             }
         }
         catch (JMSException e)

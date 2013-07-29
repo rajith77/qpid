@@ -468,6 +468,10 @@ public class Session extends SessionInvoker
 
             if (ge(upper, commandsIn))
             {
+                System.out.println("********************************");
+                System.out.println("Commands in : " + commandsIn);
+                System.out.println("Given range : " + Range.newInstance(lower, upper));
+                System.out.println("********************************");
                 throw new IllegalArgumentException
                     ("range exceeds max received command-id: " + Range.newInstance(lower, upper));
             }

@@ -519,7 +519,10 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         for (MessageConsumerImpl cons : _consumers.values())
         {
             cons.createSubscription();
-            cons.startMessageDelivery();
+            if (isStarted())
+            {
+                cons.start();
+            }
         }
         for (MessageProducerImpl prod : _producers)
         {
@@ -870,7 +873,10 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     void addToReplayQueue(MessageTransfer msg)
     {
-        _replayQueue.put(msg.getId(), msg);
+        if (_ackMode != AcknowledgeMode.TRANSACTED)
+        {
+            _replayQueue.put(msg.getId(), msg);
+        }
     }
 
     void setException(SessionException e)

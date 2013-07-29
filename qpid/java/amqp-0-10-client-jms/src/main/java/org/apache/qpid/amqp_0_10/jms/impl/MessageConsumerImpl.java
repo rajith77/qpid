@@ -289,7 +289,8 @@ public class MessageConsumerImpl implements MessageConsumer
     @Override
     public String toString()
     {
-        return "Consumer ID: " + _consumerId + ", Dest: " + _dest.getAddress();
+        return "ID:" + _consumerId + "delivery-in-progress:" + _msgDeliveryInProgress.getCurrentValue() + ", delivery-stopped:"
+                + _msgDeliveryStopped.getCurrentValue() + ", Dest:" + _dest.getAddress();
     }
 
     MessageImpl receiveImpl(long timeout) throws JMSException
@@ -426,7 +427,7 @@ public class MessageConsumerImpl implements MessageConsumer
             _replayQueue.add(m);
         case DUPS_OK:
             _replayQueue.add(m);
-            if (_replayQueue.size() >= _capacity)
+            if (_replayQueue.size() >= _capacity * 0.8)
             {
                 sendMessageAccept(false);
             }
@@ -626,10 +627,12 @@ public class MessageConsumerImpl implements MessageConsumer
 
     void clearLocalAndReplayQueue()
     {
+        _completions.clear();
+        _unsentCompletions = 0;
         _localQueue.clear();
         _replayQueue.clear();
     }
-    
+
     boolean isClosed()
     {
         return _closed.get();

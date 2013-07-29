@@ -151,4 +151,10 @@ public class ConditionManager
             return _value;
         }
     }
+
+    @Override
+    public String toString()
+    {
+        return "ConditionManager value : " + _value + ", continue : " + _continue;
+    }
 }
