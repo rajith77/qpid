@@ -90,6 +90,8 @@ public class MessageProducerImpl implements MessageProducer
 
     private final boolean _isReplayRequired;
 
+    private final AtomicBoolean _closing = new AtomicBoolean(false);
+
     private final AtomicBoolean _closed = new AtomicBoolean(false);
 
     private final ConditionManager _msgSendingInProgress = new ConditionManager(false);
@@ -464,9 +466,25 @@ public class MessageProducerImpl implements MessageProducer
         _msgSendingInProgress.waitUntilFalse();
     }
 
+    void markAsClosing()
+    {
+        _closing.set(true);
+    }
+
+    void preFailover()
+    {
+        stopMessageSender();
+    }
+
+    void postFailover() throws JMSException
+    {
+        verifyDestinationForProducer();
+        startMessageSender();
+    }
+
     private void checkPreConditions() throws JMSException
     {
-        if (_closed.get())
+        if (_closing.get() || _closed.get())
         {
             throw new IllegalStateException("Producer is closed");
         }

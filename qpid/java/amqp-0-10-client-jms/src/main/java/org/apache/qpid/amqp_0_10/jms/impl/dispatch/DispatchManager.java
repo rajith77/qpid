@@ -24,7 +24,7 @@ public interface DispatchManager<K>
 {
     public void register(K key);
 
-    public void unregister(K key);
+    public void unregister(K key, boolean waitUntilStopped);
 
     public void dispatch(Dispatchable<K> dispatchable);
 
@@ -41,6 +41,8 @@ public interface DispatchManager<K>
     public void start();
 
     public void stop();
+
+    public void markStop();
 
     public void shutdown();
 }

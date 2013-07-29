@@ -363,7 +363,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 _state = State.UNCONNECTED;
                 try
                 {
-                    _logger.info("Executing pre failover routine");
+                    _logger.warn("Executing pre failover routine");
                     preFailover();
                 }
                 catch (JMSException e)
@@ -393,7 +393,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 {
                     try
                     {
-                        _logger.info("Reconnection succesfull, Executing post failover routine");
+                        _logger.warn("Reconnection succesfull, Executing post failover routine");
                         postFailover();
                     }
                     catch (JMSException e)
@@ -413,6 +413,8 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
                     try
                     {
+                        markAsClosing();
+                        _failoverInProgress.setValueAndNotify(false);
                         closeImpl(status == FailoverStatus.POST_FAILOVER_FAILED);
                     }
                     catch (JMSException e)
@@ -422,11 +424,16 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                     break;
 
                 default:
-                    _logger.info("Failover succesfull. Connection Ready to be used");                    
+                    _failoverInProgress.setValueAndNotify(false);
+                    _logger.warn("Failover succesfull. Connection Ready to be used");
                     break;
                 }
                 _lock.notifyAll();
             }
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
         }
         finally
         {
@@ -487,9 +494,11 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         }
     }
 
+    // ----------------These methods are only called from closed()
+    // method----------------------
     void preFailover() throws JMSException
     {
-        _dispatchManager.stop();
+        _dispatchManager.markStop();
         for (SessionImpl ssn : _sessions.values())
         {
             ssn.preFailover();
@@ -506,6 +515,16 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         _dispatchManager.start();
     }
 
+    void markAsClosing()
+    {
+        for (SessionImpl ssn : _sessions.values())
+        {
+            ssn.markAsClosing();
+        }
+    }
+
+    // -----------------------------------------------------------
+
     org.apache.qpid.transport.Connection getAMQPConnection()
     {
         return _amqpConnection;
@@ -520,7 +539,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         }
     }
 
-    void removeSession(SessionImpl session)
+    void removeSession(SessionImpl session, boolean waitUntilDispatcherStopped)
     {
         synchronized (_lock)
         {
@@ -528,7 +547,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             if (ssn != null)
             {
                 _sessions.remove(ssn);
-                _dispatchManager.unregister(ssn);
+                _dispatchManager.unregister(ssn, waitUntilDispatcherStopped);
             }
         }
     }
@@ -732,7 +751,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
             if (ssn != null && ssn.getException() != null)
             {
-                removeSession(ssn);
+                removeSession(ssn, true);
                 try
                 {
                     ssn.closeImpl(false, false);

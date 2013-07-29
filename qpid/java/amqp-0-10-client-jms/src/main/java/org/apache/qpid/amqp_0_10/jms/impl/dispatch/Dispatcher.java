@@ -65,7 +65,6 @@ public class Dispatcher<K> implements Runnable
         try
         {
             _dispatcherShutdown.setValueAndNotify(false);
-
             while (_continue.get())
             {
                 if (_stopped.get())

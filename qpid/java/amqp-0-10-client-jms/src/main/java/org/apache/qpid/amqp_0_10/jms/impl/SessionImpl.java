@@ -126,6 +126,8 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private final List<TemporaryQueue> _tempQueues = new ArrayList<TemporaryQueue>();
 
+    private final AtomicBoolean _closing = new AtomicBoolean(false);
+
     private final AtomicBoolean _closed = new AtomicBoolean(false);
 
     private final AtomicBoolean _failedOverDirty = new AtomicBoolean(false);
@@ -168,12 +170,12 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     private void createProtocolSession() throws JMSException
     {
         System.out.println("================================");
-        System.out.println("Creating session " + _ackMode);  
+        System.out.println("Creating session " + _ackMode);
         System.out.println("================================");
         try
         {
             // Remove any old associations if present.
-            _conn.removeSession(this);
+            _conn.removeSession(this, false);
             _amqpSession = _conn.getAMQPConnection().createSession(1);
             _conn.addSession(this);
         }
@@ -185,14 +187,14 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         try
         {
             System.out.println("================================");
-            System.out.println("Going to mark session transacted");  
+            System.out.println("Going to mark session transacted");
             System.out.println("================================");
             if (_ackMode == AcknowledgeMode.TRANSACTED)
             {
                 _amqpSession.txSelect();
                 _amqpSession.setTransacted(true);
                 System.out.println("================================");
-                System.out.println("Marked session transacted");  
+                System.out.println("Marked session transacted");
                 System.out.println("================================");
             }
         }
@@ -202,7 +204,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
 
         System.out.println("================================");
-        System.out.println("Finish session creation");  
+        System.out.println("Finish session creation");
         System.out.println("================================");
 
         _amqpSession.setSessionListener(_conn);
@@ -228,7 +230,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
             if (unregister)
             {
-                _conn.removeSession(this);
+                _conn.removeSession(this, _dispatcherThread == Thread.currentThread());
             }
 
             cancelTimerTask();
@@ -499,17 +501,16 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             _failedOverDirty.set(true);
         }
 
-        stopMessageDelivery();
+        _msgDeliveryStopped.setValueAndNotify(true);
 
         for (MessageProducerImpl prod : _producers)
         {
-            prod.stopMessageSender();
+            prod.preFailover();
         }
 
         for (MessageConsumerImpl cons : _consumers.values())
         {
-            cons.stopMessageDelivery();
-            cons.clearLocalAndReplayQueue();
+            cons.preFailover();
         }
     }
 
@@ -518,16 +519,11 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         createProtocolSession();
         for (MessageConsumerImpl cons : _consumers.values())
         {
-            cons.createSubscription();
-            if (isStarted())
-            {
-                cons.start();
-            }
+            cons.postFailover();
         }
         for (MessageProducerImpl prod : _producers)
         {
-            prod.verifyDestinationForProducer();
-            prod.startMessageSender();
+            prod.postFailover();
         }
 
         startMessageDelivery();
@@ -717,28 +713,28 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public Message createMessage() throws JMSException
     {
-        checkPreConditions();
+        checkClosed();
         return _messageFactory.createMessage();
     }
 
     @Override
     public BytesMessage createBytesMessage() throws JMSException
     {
-        checkPreConditions();
+        checkClosed();
         return _messageFactory.createBytesMessage();
     }
 
     @Override
     public TextMessage createTextMessage() throws JMSException
     {
-        checkPreConditions();
+        checkClosed();
         return _messageFactory.createTextMessage();
     }
 
     @Override
     public TextMessage createTextMessage(String txt) throws JMSException
     {
-        checkPreConditions();
+        checkClosed();
         TextMessage msg = createTextMessage();
         msg.setText(txt);
         return msg;
@@ -747,14 +743,14 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public MapMessage createMapMessage() throws JMSException
     {
-        checkPreConditions();
+        checkClosed();
         return _messageFactory.createMapMessage();
     }
 
     @Override
     public ObjectMessage createObjectMessage() throws JMSException
     {
-        checkPreConditions();
+        checkClosed();
         return _messageFactory.createObjectMessage();
     }
 
@@ -770,21 +766,21 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public StreamMessage createStreamMessage() throws JMSException
     {
-        checkPreConditions();
+        checkClosed();
         return _messageFactory.createStreamMessage();
     }
 
     @Override
     public Queue createQueue(String queue) throws JMSException
     {
-        checkPreConditions();
+        checkClosed();
         return new QueueImpl(queue);
     }
 
     @Override
     public javax.jms.TemporaryQueue createTemporaryQueue() throws JMSException
     {
-        checkPreConditions();
+        checkClosed();
         TemporaryQueueImpl queue = new TemporaryQueueImpl(this);
         _tempQueues.add(queue);
         return queue;
@@ -793,14 +789,14 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public TemporaryTopic createTemporaryTopic() throws JMSException
     {
-        checkPreConditions();
+        checkClosed();
         return new TemporaryTopicImpl(this);
     }
 
     @Override
     public Topic createTopic(String topic) throws JMSException
     {
-        checkPreConditions();
+        checkClosed();
         return new TopicImpl(topic);
     }
 
@@ -823,7 +819,16 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     void checkPreConditions() throws JMSException
     {
-        if (_closed.get())
+        if (!_closing.get() && !_closed.get())
+        {
+            _conn.waitForFailoverToComplete();
+        }
+        checkClosed();
+    }
+
+    void checkClosed() throws JMSException
+    {
+        if (_closing.get() || _closed.get())
         {
             if (_exception == null)
             {
@@ -837,7 +842,20 @@ public class SessionImpl implements Session, QueueSession, TopicSession
                 throw ex;
             }
         }
-        _conn.waitForFailoverToComplete();
+    }
+
+    void markAsClosing()
+    {
+        _closing.set(true);
+        for (MessageConsumerImpl cons : _consumers.values())
+        {
+            cons.markAsClosing();
+        }
+
+        for (MessageProducerImpl prod : _producers)
+        {
+            prod.markAsClosing();
+        }
     }
 
     void removeProducer(MessageProducerImpl prod)
@@ -941,6 +959,8 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
         catch (Exception e)
         {
+            System.out.println("Error replaying messages after failover");
+            e.printStackTrace();
             throw ExceptionHelper.toJMSException("Error replaying messages after failover", e);
         }
     }
@@ -953,6 +973,11 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     SessionException getException()
     {
         return _exception;
+    }
+
+    boolean isStarted()
+    {
+        return _conn.isStarted();
     }
 
     private void checkTransactional() throws JMSException
@@ -1010,11 +1035,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             _msgDeliveryStopped.wakeUpAndReturn();
             _msgDeliveryInProgress.waitUntilFalse();
         }
-    }
-
-    private boolean isStarted()
-    {
-        return _conn.isStarted();
     }
 
     private void verifyDestination(Destination dest, boolean isNullAllowed) throws JMSException

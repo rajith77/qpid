@@ -71,13 +71,19 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private final RangeSet _completions = RangeSetFactory.createRangeSet();
 
+    private final AtomicBoolean _closing = new AtomicBoolean(false);
+
     private final AtomicBoolean _closed = new AtomicBoolean(false);
+
+    private final ConditionManager _receiveInProgress = new ConditionManager(false);
 
     private final ConditionManager _msgDeliveryInProgress = new ConditionManager(false);
 
     private final ConditionManager _msgDeliveryStopped = new ConditionManager(true);
 
     private final AtomicBoolean _redeliverCurrentMsg = new AtomicBoolean(false);
+
+    private final AtomicBoolean _discardCurrentMsg = new AtomicBoolean(false);
 
     private String _subscriptionQueue;
 
@@ -145,14 +151,14 @@ public class MessageConsumerImpl implements MessageConsumer
     @Override
     public MessageListener getMessageListener() throws JMSException
     {
-        checkPreConditions();
+        checkClosed();
         return _msgListener;
     }
 
     @Override
     public String getMessageSelector() throws JMSException
     {
-        checkPreConditions();
+        checkClosed();
         return _selector;
     }
 
@@ -289,8 +295,8 @@ public class MessageConsumerImpl implements MessageConsumer
     @Override
     public String toString()
     {
-        return "ID:" + _consumerId + "delivery-in-progress:" + _msgDeliveryInProgress.getCurrentValue() + ", delivery-stopped:"
-                + _msgDeliveryStopped.getCurrentValue() + ", Dest:" + _dest.getAddress();
+        return "ID:" + _consumerId + "delivery-in-progress:" + _msgDeliveryInProgress.getCurrentValue()
+                + ", delivery-stopped:" + _msgDeliveryStopped.getCurrentValue() + ", Dest:" + _dest.getAddress();
     }
 
     MessageImpl receiveImpl(long timeout) throws JMSException
@@ -298,15 +304,13 @@ public class MessageConsumerImpl implements MessageConsumer
         MessageImpl m = null;
         try
         {
-            _msgDeliveryInProgress.setValueAndNotify(true);
-            checkPreConditions();
+            checkClosed();
             _syncReceiveThread = Thread.currentThread();
 
             if (_localQueue.isEmpty() && isPrefetchDisabled())
             {
                 setMessageCredit(1);
                 sendMessageFlush();
-                sync(timeout);
             }
             try
             {
@@ -329,6 +333,8 @@ public class MessageConsumerImpl implements MessageConsumer
                 _logger.warn(e, "Interrupted while waiting for message on local queue.");
             }
 
+            checkClosed();
+
             if (m != null)
             {
                 postDeliver(m);
@@ -337,7 +343,6 @@ public class MessageConsumerImpl implements MessageConsumer
         finally
         {
             _syncReceiveThread = null;
-            _msgDeliveryInProgress.setValueAndNotify(false);
         }
         return m;
     }
@@ -383,7 +388,10 @@ public class MessageConsumerImpl implements MessageConsumer
                     {
                         setMessageCredit(1);
                     }
-                    postDeliver(m);
+                    if (!_discardCurrentMsg.get())
+                    {
+                        postDeliver(m);
+                    }
                 }
                 catch (JMSException e)
                 {
@@ -476,6 +484,38 @@ public class MessageConsumerImpl implements MessageConsumer
             _msgDeliveryStopped.setValueAndNotify(true);
             _msgDeliveryStopped.wakeUpAndReturn();
             waitForInProgressDeliveriesToStop();
+        }
+    }
+
+    /*
+     * Not waiting for delivery to be stopped, as the dispatcher thread maybe
+     * blocked inside onMessage() on some application logic or on the
+     * failoverInProgress condition if it has called commit(), recover() etc...
+     */
+    void preFailover()
+    {
+        _msgDeliveryStopped.setValueAndNotify(true);
+        _msgDeliveryStopped.wakeUpAndReturn();
+        if (_msgDeliveryInProgress.getCurrentValue())
+        {
+            if (_msgListener == null)
+            {
+                waitForInProgressDeliveriesToStop();
+            }
+            else
+            {
+                _discardCurrentMsg.set(true);
+            }
+        }
+        clearLocalAndReplayQueue();
+    }
+
+    void postFailover() throws JMSException
+    {
+        createSubscription();
+        if (_session.isStarted())
+        {
+            start();
         }
     }
 
@@ -638,6 +678,11 @@ public class MessageConsumerImpl implements MessageConsumer
         return _closed.get();
     }
 
+    void markAsClosing()
+    {
+        _closing.set(true);
+    }
+
     protected SessionImpl getSession()
     {
         return _session;
@@ -781,7 +826,7 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private void preSyncReceiveCheck() throws JMSException
     {
-        checkPreConditions();
+        checkClosed();
         if (_msgListener != null)
         {
             throw new IllegalStateException("A listener has already been set.");
@@ -790,11 +835,16 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private void checkPreConditions() throws JMSException
     {
-        if (_closed.get())
+        checkClosed();
+        _session.checkPreConditions();
+    }
+
+    private void checkClosed() throws JMSException
+    {
+        if (_closing.get() || _closed.get())
         {
             throw new IllegalStateException("Consumer is closed");
         }
-        _session.checkPreConditions();
     }
 
     private boolean isMessageListener()

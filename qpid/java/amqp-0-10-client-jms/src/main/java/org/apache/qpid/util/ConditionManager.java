@@ -120,15 +120,21 @@ public class ConditionManager
                 {
                     if (timeout < 0)
                     {
+                        preWaiting();
                         _lock.wait();
                     }
                     else
                     {
+                        preWaiting();
                         _lock.wait(timeout - elapsed);
                     }
                 }
                 catch (InterruptedException e)
                 {
+                }
+                finally
+                {
+                    postWaiting();
                 }
 
                 if (timeout > 0)
@@ -150,6 +156,14 @@ public class ConditionManager
         {
             return _value;
         }
+    }
+
+    public void preWaiting()
+    {
+    }
+
+    public void postWaiting()
+    {
     }
 
     @Override
