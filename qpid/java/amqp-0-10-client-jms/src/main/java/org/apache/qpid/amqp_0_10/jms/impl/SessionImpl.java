@@ -169,9 +169,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     private void createProtocolSession() throws JMSException
     {
-        System.out.println("================================");
-        System.out.println("Creating session " + _ackMode);
-        System.out.println("================================");
         try
         {
             // Remove any old associations if present.
@@ -186,26 +183,16 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
         try
         {
-            System.out.println("================================");
-            System.out.println("Going to mark session transacted");
-            System.out.println("================================");
             if (_ackMode == AcknowledgeMode.TRANSACTED)
             {
                 _amqpSession.txSelect();
                 _amqpSession.setTransacted(true);
-                System.out.println("================================");
-                System.out.println("Marked session transacted");
-                System.out.println("================================");
             }
         }
         catch (SessionException se)
         {
             throw ExceptionHelper.toJMSException("Error marking protocol session as transacted", se);
         }
-
-        System.out.println("================================");
-        System.out.println("Finish session creation");
-        System.out.println("================================");
 
         _amqpSession.setSessionListener(_conn);
     }
@@ -347,7 +334,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
 
         requeueMessages(requeueList);
-        sortDispatchQueue();
+        //sortDispatchQueue();
 
         for (MessageConsumerImpl cons : _consumers.values())
         {
@@ -395,7 +382,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
 
         requeueMessages(requeueList);
-        sortDispatchQueue();
+        //sortDispatchQueue();
 
         for (MessageConsumerImpl cons : _consumers.values())
         {
@@ -411,7 +398,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     void messageReceived(MessageImpl m)
     {
-        System.out.println("SessionImpl.messageReceived xxxx ");
         if (isClosed())
         {
             // drop the message on the floor.
@@ -434,8 +420,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         try
         {
             _msgDeliveryInProgress.setValueAndNotify(true);
-            System.out.println("################# going to deliver to consumer _msgDeliveryInProgress : "
-                    + _msgDeliveryInProgress.getCurrentValue());
             MessageConsumerImpl cons = _consumers.get(m.getConsumerId());
             if (cons != null)
             {
@@ -451,14 +435,11 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         {
             _dispatcherThread = null;
             _msgDeliveryInProgress.setValueAndNotify(false);
-            System.out.println("################# finally _msgDeliveryInProgress : "
-                    + _msgDeliveryInProgress.getCurrentValue());
         }
     }
 
     void start() throws JMSException
     {
-        System.out.println("************************* Start called on consumer. " + _consumers);
         for (MessageConsumerImpl cons : _consumers.values())
         {
             System.out.println("************************* Start called on consumer.  Is closed " + cons.isClosed());
@@ -773,6 +754,11 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public Queue createQueue(String queue) throws JMSException
     {
+        if (queue.indexOf(";") == -1)
+        {
+            queue = queue.concat(";{create:always}");
+        }
+        
         checkClosed();
         return new QueueImpl(queue);
     }
@@ -796,6 +782,10 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public Topic createTopic(String topic) throws JMSException
     {
+        if (topic.indexOf("/") == -1)
+        {
+            topic = "amq.topic/" + topic;
+        }
         checkClosed();
         return new TopicImpl(topic);
     }
@@ -926,9 +916,23 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         _conn.requeueMessage(this, m);
     }
 
-    void requeueMessages(List<MessageImpl> list)
+    void requeueMessages(List<MessageImpl> list) throws JMSException
     {
-        _conn.requeueMessages(this, list);
+        try
+        {
+            RangeSet range = RangeSetFactory.createRangeSet();
+            for (MessageImpl m : list)
+            {
+                range.add(m.getTransferId());
+            }
+            getAMQPSession().messageRelease(range);
+        }
+        catch (Exception e)
+        {
+            throw ExceptionHelper.toJMSException("Error releasing messages.", e);
+        }
+        
+        //_conn.requeueMessages(this, list);
     }
 
     void sortDispatchQueue()

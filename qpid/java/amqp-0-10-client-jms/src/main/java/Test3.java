@@ -2,6 +2,7 @@
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import javax.jms.Connection;
 import javax.jms.ExceptionListener;
 import javax.jms.JMSException;
 import javax.jms.Message;
@@ -10,6 +11,7 @@ import javax.jms.MessageListener;
 import javax.jms.MessageProducer;
 import javax.jms.Session;
 import javax.jms.TextMessage;
+import javax.jms.Topic;
 
 import org.apache.qpid.amqp_0_10.jms.impl.ConnectionImpl;
 
@@ -32,8 +34,12 @@ public class Test3
             }});
         _con.start();
         
+        
         final Session ssn = _con.createSession(true, Session.SESSION_TRANSACTED);
-        MessageConsumer cons = ssn.createConsumer(ssn.createQueue("MY_QUEUE;{create: always}"));
+        
+        Topic topic = ssn.createTopic("Hello");
+        
+        MessageConsumer cons = ssn.createConsumer(ssn.createQueue("MY_QUEUE"));
         cons.setMessageListener(new MessageListener()
         {
 
@@ -88,6 +94,8 @@ public class Test3
      */
     public static void main(String[] args) throws Exception
     {
+        Connection con = JMSProvider.getConnection("amqp://username:password@clientid/test?failover='roundrobin?cyclecount='0''&brokerlist='tcp://localhost:5672;tcp://localhost:6672'");
+        
         final Test3 test = new Test3();
         Thread t = new Thread(new Runnable(){
 

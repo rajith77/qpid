@@ -70,8 +70,6 @@ public class Dispatcher<K> implements Runnable
                 if (_stopped.get())
                 {
                     _dispatcherStarted.setValueAndNotify(false);
-                    System.out.println("XXXXXXXXXXXXXXXXX Stopped true, Value of _dispatcherStarted="
-                            + _dispatcherStarted.getCurrentValue());
                 }
 
                 _dispatcherStarted.waitUntilTrue();
@@ -80,9 +78,6 @@ public class Dispatcher<K> implements Runnable
                 {
                     try
                     {
-                        System.out
-                                .println("XXXXXXXXXXXXXXXXX going take message and dispatch, value of _dispatcherStarted="
-                                        + _dispatcherStarted.getCurrentValue());
                         _dispatchQueue.take().dispatch();
                     }
                     catch (InterruptedException e)
@@ -97,8 +92,6 @@ public class Dispatcher<K> implements Runnable
         finally
         {
             _dispatcherShutdown.setValueAndNotify(true);
-            System.out.println("XXXXXXXXXXXXXXXXX _dispatcherShutdown notified true, value of _dispatcherShutdown="
-                    + _dispatcherShutdown.getCurrentValue());
         }
     }
 

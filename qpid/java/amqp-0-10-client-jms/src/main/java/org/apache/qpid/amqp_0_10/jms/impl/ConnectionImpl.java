@@ -255,10 +255,10 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     public void setClientID(String id) throws JMSException
     {
         checkNotConnected("Cannot set client-id to \"" + id + "\"; client-id must be set before the connection is used");
-        if (_clientId != null)
-        {
-            throw new IllegalStateException("client-id has already been set");
-        }
+        //if (_clientId != null)
+        //{
+        //    throw new IllegalStateException("client-id has already been set");
+        //}
         verifyClientID();
         _clientId = id;
     }
@@ -359,6 +359,14 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         {
             synchronized (_lock)
             {
+                
+                System.out.println("======= Pre Failover ==========");
+                for (org.apache.qpid.transport.Session ssn: _sessions.keySet())
+                {
+                    System.out.println(ssn + " = " + _sessions.get(ssn));
+                }
+                System.out.println("======= Pre Failover ==========");
+                
                 State prevState = _state;
                 _state = State.UNCONNECTED;
                 try
@@ -426,6 +434,12 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 default:
                     _failoverInProgress.setValueAndNotify(false);
                     _logger.warn("Failover succesfull. Connection Ready to be used");
+                    System.out.println("======= Post Failover ==========");
+                    for (org.apache.qpid.transport.Session ssn: _sessions.keySet())
+                    {
+                        System.out.println(ssn + " = " + _sessions.get(ssn));
+                    }
+                    System.out.println("======= Post Failover ==========");
                     break;
                 }
                 _lock.notifyAll();
@@ -546,6 +560,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             org.apache.qpid.transport.Session ssn = session.getAMQPSession();
             if (ssn != null)
             {
+                //ssn.setSessionListener(null);
                 _sessions.remove(ssn);
                 _dispatchManager.unregister(ssn, waitUntilDispatcherStopped);
             }
@@ -721,6 +736,13 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         {
             try
             {
+                if (_sessions.get(ssn) == null)
+                {
+                    System.out.println("====================================");
+                    System.out.println("No matching session " + ssn);
+                    System.out.println("====================================");
+                }
+                
                 MessageImpl msg = (MessageImpl) _messageFactory.createMessage(_sessions.get(ssn), xfr);
                 _dispatchManager.dispatch(msg);
             }

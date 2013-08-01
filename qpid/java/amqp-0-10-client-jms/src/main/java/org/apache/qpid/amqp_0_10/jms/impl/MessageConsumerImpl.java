@@ -75,8 +75,6 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private final AtomicBoolean _closed = new AtomicBoolean(false);
 
-    private final ConditionManager _receiveInProgress = new ConditionManager(false);
-
     private final ConditionManager _msgDeliveryInProgress = new ConditionManager(false);
 
     private final ConditionManager _msgDeliveryStopped = new ConditionManager(true);
@@ -94,9 +92,15 @@ public class MessageConsumerImpl implements MessageConsumer
     private Thread _dispatcherThread;
 
     private int _unsentCompletions = 0;
+    
+    private int _lastTransferId = 0;
 
     private MessageImpl _currentMsg = null;
 
+    private RangeSet _prevRange;
+    
+    MessageImpl _prevMsg;
+    
     protected MessageConsumerImpl(String consumerId, SessionImpl ssn, DestinationImpl dest, String selector,
             boolean noLocal, boolean browseOnly, AcknowledgeMode ackMode) throws JMSException
     {
@@ -317,7 +321,6 @@ public class MessageConsumerImpl implements MessageConsumer
                 if (timeout > 0)
                 {
                     m = _localQueue.poll(timeout, TimeUnit.MILLISECONDS);
-                    System.out.println("receive message xxxxxxxxxx  timeout : " + timeout + " msg : " + m);
                 }
                 else if (timeout < 0)
                 {
@@ -349,7 +352,6 @@ public class MessageConsumerImpl implements MessageConsumer
 
     void messageReceived(MessageImpl m)
     {
-        System.out.println("ConsumerImpl.messageReceived xxxx ");
         if (isClosed())
         {
             releaseMessageAndLogException(m);
@@ -380,7 +382,16 @@ public class MessageConsumerImpl implements MessageConsumer
             {
                 _dispatcherThread = Thread.currentThread();
                 _currentMsg = m;
-                _msgListener.onMessage(m);
+                try
+                {
+                    _msgListener.onMessage(m);
+                }
+                catch (Exception e)
+                {
+                    //To protect the dispatcher thread from existing due to unhandled application errors.
+                    _logger.warn(e, "Exception thrown from onMessage()");
+                    fullDump(false);
+                }
 
                 try
                 {
@@ -388,9 +399,25 @@ public class MessageConsumerImpl implements MessageConsumer
                     {
                         setMessageCredit(1);
                     }
-                    if (!_discardCurrentMsg.get())
+                    if (_discardCurrentMsg.get())
                     {
-                        postDeliver(m);
+                        System.out.println("==========================================");
+                        System.out.println("Discarding the message. As it was consumed while in midst of failover");
+                        fullDump(false);
+                        System.out.println("==========================================");
+                        
+                        _discardCurrentMsg.set(false);                        
+                    }
+                    else
+                    {
+                        try
+                        {
+                            postDeliver(m);
+                        }
+                        catch (Exception e)
+                        {
+                            fullDump(true);
+                        }
                     }
                 }
                 catch (JMSException e)
@@ -402,7 +429,6 @@ public class MessageConsumerImpl implements MessageConsumer
             {
                 try
                 {
-                    System.out.println("xxxxxxx Adding message to queue " + m);
                     _localQueue.put(m);
                 }
                 catch (InterruptedException e)
@@ -433,12 +459,14 @@ public class MessageConsumerImpl implements MessageConsumer
         case TRANSACTED:
         case CLIENT_ACK:
             _replayQueue.add(m);
+            break;
         case DUPS_OK:
             _replayQueue.add(m);
             if (_replayQueue.size() >= _capacity * 0.8)
             {
                 sendMessageAccept(false);
             }
+            break;
         default: // NO_ACK
             break;
         }
@@ -496,22 +524,19 @@ public class MessageConsumerImpl implements MessageConsumer
     {
         _msgDeliveryStopped.setValueAndNotify(true);
         _msgDeliveryStopped.wakeUpAndReturn();
-        if (_msgDeliveryInProgress.getCurrentValue())
+        if (_msgListener == null)
         {
-            if (_msgListener == null)
-            {
-                waitForInProgressDeliveriesToStop();
-            }
-            else
-            {
-                _discardCurrentMsg.set(true);
-            }
+            waitForInProgressDeliveriesToStop();
+        }
+        else
+        {
+            _discardCurrentMsg.set(true);
         }
         clearLocalAndReplayQueue();
     }
 
     void postFailover() throws JMSException
-    {
+    {        
         createSubscription();
         if (_session.isStarted())
         {
@@ -584,17 +609,22 @@ public class MessageConsumerImpl implements MessageConsumer
     // In 0-10 completions affects message credit
     void sendCompleted(MessageImpl m)
     {
-        _unsentCompletions++;
-        _completions.add(m.getTransferId());
-        if (_capacity == 0 || _unsentCompletions > _capacity / 2)
+        if (m.getId() > _lastTransferId)
         {
-            for (final Range range : _completions)
+            _lastTransferId = m.getId();
+            _unsentCompletions++;
+            _completions.add(m.getTransferId());
+            if (_capacity == 0 || _unsentCompletions > _capacity / 2)
             {
-                _session.getAMQPSession().processed(range);
+                for (final Range range : _completions)
+                {
+                    _session.getAMQPSession().processed(range);
+                }
+                _session.getAMQPSession().flushProcessed(BATCH);
+                _completions.clear();
+                _unsentCompletions = 0;
+                _lastTransferId = 0;
             }
-            _session.getAMQPSession().flushProcessed(BATCH);
-            _completions.clear();
-            _unsentCompletions = 0;
         }
     }
 
@@ -636,6 +666,16 @@ public class MessageConsumerImpl implements MessageConsumer
 
     void getUnackedMessageIds(final RangeSet range, int threshold) throws JMSException
     {
+        System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+        System.out.println("Replay Queue size : " + _replayQueue.size());
+        if (_replayQueue.size() > 1)
+        {
+            for (MessageImpl m: _replayQueue)
+            {
+                System.out.println(m);
+            }
+        }
+        System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
         try
         {
             Iterator<MessageImpl> it = _replayQueue.iterator();
@@ -646,11 +686,53 @@ public class MessageConsumerImpl implements MessageConsumer
                 {
                     range.add(m.getTransferId());
                     it.remove();
+                    if (m.getTransferId()  == 1)
+                    {
+                        System.out.println("xxxxTransfer I : " + this.toString());
+                        System.out.println(_prevMsg == null ? "" : _prevMsg);
+                        System.out.println(m);
+                        _prevMsg = m;
+                    }
                 }
             }
+            
+            if (range.size() == 0 || range.getFirst().getLower() == 1)
+            {
+                if (_prevRange!= null && _prevRange.size() > 0 && _prevRange.getFirst().getLower() == 1)
+                {                    
+                    System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+                    System.out.println("Problem here !!!!!!!!" + this.toString());
+                    fullDump(true);
+                    System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");                    
+                    
+                }
+                else
+                {  
+                    System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+                    System.out.println("RangeSet is one : " + range);                    
+                    fullDump(false);
+                    System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+                }
+            }
+                        
+            _prevRange = range;
+            
+            System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+            System.out.println("RangeSet : " + range);
+            System.out.println("Replay Queue size (should be zero) : " + _replayQueue.size());
+            if (_replayQueue.size() > 0)
+            {
+                for (MessageImpl m: _replayQueue)
+                {
+                    System.out.println(m);
+                }
+                fullDump(true);
+            }
+            System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
         }
         catch (Exception e)
         {
+            e.printStackTrace();
             throw ExceptionHelper.toJMSException("Exception when trying to send message accepts", e);
         }
     }
@@ -855,5 +937,37 @@ public class MessageConsumerImpl implements MessageConsumer
     private boolean isPrefetchDisabled()
     {
         return _capacity == 0;
+    }
+    
+    private void fullDump(boolean exit)
+    {
+        System.out.println("****************************************************");
+        System.out.println("************ Consumer Dump **************");
+        System.out.println("Dest " + _dest);
+        
+        RangeSet range = RangeSetFactory.createRangeSet();
+        for (MessageImpl m: _replayQueue)
+        {
+            range.add(m.getId());
+        }
+        System.out.println("ReplayQueue " + range);
+        
+        
+        range = RangeSetFactory.createRangeSet();
+        for (MessageImpl m: _localQueue)
+        {
+            range.add(m.getId());
+        }
+        System.out.println("LocalQueue " + range);
+        
+        System.out.println("_unsentCompletions " + _unsentCompletions);
+        System.out.println("Completions " + _completions);
+        
+        System.out.println("****************************************************");
+        
+        /*if(exit)
+        {
+            System.exit(0);
+        }*/
     }
 }
