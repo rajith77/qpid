@@ -340,6 +340,7 @@ public class MessageConsumerImpl implements MessageConsumer
 
             if (m != null)
             {
+                preDeliver(m);
                 postDeliver(m);
             }
         }
@@ -382,6 +383,7 @@ public class MessageConsumerImpl implements MessageConsumer
             {
                 _dispatcherThread = Thread.currentThread();
                 _currentMsg = m;
+                preDeliver(m);
                 try
                 {
                     _msgListener.onMessage(m);
@@ -445,6 +447,20 @@ public class MessageConsumerImpl implements MessageConsumer
         }
     }
 
+    void preDeliver(MessageImpl m)
+    {
+        switch (_ackMode)
+        {
+        case TRANSACTED:
+        case CLIENT_ACK:
+        case DUPS_OK:
+            _replayQueue.add(m);
+            break;        
+        default: // AUTO_ACK, NO_ACK
+            break;
+        }
+    }
+
     void postDeliver(MessageImpl m) throws JMSException
     {
         sendCompleted(m);
@@ -456,22 +472,17 @@ public class MessageConsumerImpl implements MessageConsumer
                 sendMessageAccept(m, true);
             }
             break;
-        case TRANSACTED:
-        case CLIENT_ACK:
-            _replayQueue.add(m);
-            break;
         case DUPS_OK:
-            _replayQueue.add(m);
             if (_replayQueue.size() >= _capacity * 0.8)
             {
                 sendMessageAccept(false);
             }
             break;
-        default: // NO_ACK
+        default:
             break;
         }
     }
-
+    
     void start() throws JMSException
     {
         setMessageCredit(_capacity);
