@@ -358,15 +358,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         try
         {
             synchronized (_lock)
-            {
-                
-                System.out.println("======= Pre Failover ==========");
-                for (org.apache.qpid.transport.Session ssn: _sessions.keySet())
-                {
-                    System.out.println(ssn + " = " + _sessions.get(ssn));
-                }
-                System.out.println("======= Pre Failover ==========");
-                
+            {               
                 State prevState = _state;
                 _state = State.UNCONNECTED;
                 try
@@ -434,12 +426,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 default:
                     _failoverInProgress.setValueAndNotify(false);
                     _logger.warn("Failover succesfull. Connection Ready to be used");
-                    System.out.println("======= Post Failover ==========");
-                    for (org.apache.qpid.transport.Session ssn: _sessions.keySet())
-                    {
-                        System.out.println(ssn + " = " + _sessions.get(ssn));
-                    }
-                    System.out.println("======= Post Failover ==========");
                     break;
                 }
                 _lock.notifyAll();
@@ -738,9 +724,8 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             {
                 if (_sessions.get(ssn) == null)
                 {
-                    System.out.println("====================================");
-                    System.out.println("No matching session " + ssn);
-                    System.out.println("====================================");
+                    
+                    _logger.warn("Error! No matching session " + ssn);
                 }
                 
                 MessageImpl msg = (MessageImpl) _messageFactory.createMessage(_sessions.get(ssn), xfr);

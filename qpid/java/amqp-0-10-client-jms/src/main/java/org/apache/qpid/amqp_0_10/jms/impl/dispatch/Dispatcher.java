@@ -82,7 +82,6 @@ public class Dispatcher<K> implements Runnable
                     }
                     catch (InterruptedException e)
                     {
-                        System.out.println("Got interruptted :)");
                         // continue
                     }
                 }

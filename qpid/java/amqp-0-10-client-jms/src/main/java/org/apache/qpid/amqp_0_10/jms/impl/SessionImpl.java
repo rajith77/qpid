@@ -298,23 +298,9 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
         for (MessageConsumerImpl cons : _consumers.values())
         {
-            if (Thread.currentThread() == _dispatcherThread)
-            {
-                cons.setRedeliverCurrentMessage(true);
-            }
-
             cons.stopMessageDelivery();
             requeueList.addAll(cons.getUnackedMessagesForRequeue());
-
-            MessageImpl currentMsg = cons.getCurrentMessage();
-            if (Thread.currentThread() == _dispatcherThread && currentMsg != null)
-            {
-                currentMsg.setJMSRedelivered(true);
-                requeueList.add(currentMsg);
-            }
         }
-
-        System.out.println("SessionImpl.rollback requeList " + requeueList);
 
         try
         {
@@ -374,7 +360,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             requeueList.addAll(cons.getUnackedMessagesForRequeue());
 
             MessageImpl currentMsg = cons.getCurrentMessage();
-            if (Thread.currentThread() == _dispatcherThread && currentMsg != null)
+            if (_ackMode == AcknowledgeMode.AUTO_ACK && Thread.currentThread() == _dispatcherThread && currentMsg != null)
             {
                 currentMsg.setJMSRedelivered(true);
                 requeueList.add(currentMsg);
@@ -442,7 +428,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     {
         for (MessageConsumerImpl cons : _consumers.values())
         {
-            System.out.println("************************* Start called on consumer.  Is closed " + cons.isClosed());
             if (!cons.isClosed())
             {
                 cons.start();
@@ -754,11 +739,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public Queue createQueue(String queue) throws JMSException
     {
-        if (queue.indexOf(";") == -1)
-        {
-            queue = queue.concat(";{create:always}");
-        }
-        
         checkClosed();
         return new QueueImpl(queue);
     }
@@ -782,10 +762,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     @Override
     public Topic createTopic(String topic) throws JMSException
     {
-        if (topic.indexOf("/") == -1)
-        {
-            topic = "amq.topic/" + topic;
-        }
         checkClosed();
         return new TopicImpl(topic);
     }
@@ -855,7 +831,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
     void removeConsumer(MessageConsumerImpl cons)
     {
-        System.out.println("xxxxxxxxxxxxxxxxxxxxxxx Remove called on consumer. " + _consumers);
         _consumers.remove(cons);
     }
 
@@ -963,8 +938,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
         catch (Exception e)
         {
-            System.out.println("Error replaying messages after failover");
-            e.printStackTrace();
             throw ExceptionHelper.toJMSException("Error replaying messages after failover", e);
         }
     }

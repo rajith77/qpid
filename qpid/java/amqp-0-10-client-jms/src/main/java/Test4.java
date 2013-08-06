@@ -51,7 +51,7 @@ public class Test4
                 {
                     _count++;
                     System.out.println("Received " + ((TextMessage)m).getText());
-                    if (_count == 5)
+                    if (_count >= 5)
                     {
                         ssn.rollback();
                     }
@@ -74,7 +74,7 @@ public class Test4
         try
         {
             Session ssn = _con.createSession(true, Session.SESSION_TRANSACTED);
-            MessageProducer prod = ssn.createProducer(ssn.createQueue("MY_QUEUE;{create: always}"));
+            MessageProducer prod = ssn.createProducer(ssn.createQueue("MY_QUEUE;{create: always, node:{x-declare:{arguments:{'qpid.max_count': 2}}}}"));
             for (int i = 0; i < 10; i++)
             {
                 try

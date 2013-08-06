@@ -670,7 +670,6 @@ public class AddressResolution
         }
         catch (Exception e)
         {
-            System.out.println("Error looking up exchange : " + dest.getAddress().getName());
             return NodeQueryStatus.NOT_FOUND;
         }
     }

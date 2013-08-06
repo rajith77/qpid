@@ -81,8 +81,6 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private final AtomicBoolean _redeliverCurrentMsg = new AtomicBoolean(false);
 
-    private final AtomicBoolean _discardCurrentMsg = new AtomicBoolean(false);
-
     private String _subscriptionQueue;
 
     private volatile MessageListener _msgListener;
@@ -96,10 +94,6 @@ public class MessageConsumerImpl implements MessageConsumer
     private int _lastTransferId = 0;
 
     private MessageImpl _currentMsg = null;
-
-    private RangeSet _prevRange;
-    
-    MessageImpl _prevMsg;
     
     protected MessageConsumerImpl(String consumerId, SessionImpl ssn, DestinationImpl dest, String selector,
             boolean noLocal, boolean browseOnly, AcknowledgeMode ackMode) throws JMSException
@@ -274,12 +268,10 @@ public class MessageConsumerImpl implements MessageConsumer
         try
         {
             remaining = _msgDeliveryStopped.waitUntilFalse(remaining);
-            System.out.println("receive xxxxxxxxxx  timeout : " + timeout);
         }
         catch (ConditionManagerTimeoutException e)
         {
-            System.out.println("receive xxxxxxxxxx  ConditionManagerTimeoutException : " + e);
-            // Time out, return null.
+           // Time out, return null.
             return null;
         }
         return receiveImpl(remaining);
@@ -401,25 +393,13 @@ public class MessageConsumerImpl implements MessageConsumer
                     {
                         setMessageCredit(1);
                     }
-                    if (_discardCurrentMsg.get())
+                    try
                     {
-                        System.out.println("==========================================");
-                        System.out.println("Discarding the message. As it was consumed while in midst of failover");
-                        fullDump(false);
-                        System.out.println("==========================================");
-                        
-                        _discardCurrentMsg.set(false);                        
+                        postDeliver(m);
                     }
-                    else
+                    catch (Exception e)
                     {
-                        try
-                        {
-                            postDeliver(m);
-                        }
-                        catch (Exception e)
-                        {
-                            fullDump(true);
-                        }
+                        fullDump(true);
                     }
                 }
                 catch (JMSException e)
@@ -539,10 +519,6 @@ public class MessageConsumerImpl implements MessageConsumer
         {
             waitForInProgressDeliveriesToStop();
         }
-        else
-        {
-            _discardCurrentMsg.set(true);
-        }
         clearLocalAndReplayQueue();
     }
 
@@ -565,6 +541,7 @@ public class MessageConsumerImpl implements MessageConsumer
             tmp.add(m);
             it.remove();
         }
+        _replayQueue.clear();
         _localQueue.drainTo(tmp);
         return tmp;
     }
@@ -676,17 +653,7 @@ public class MessageConsumerImpl implements MessageConsumer
     }
 
     void getUnackedMessageIds(final RangeSet range, int threshold) throws JMSException
-    {
-        System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
-        System.out.println("Replay Queue size : " + _replayQueue.size());
-        if (_replayQueue.size() > 1)
-        {
-            for (MessageImpl m: _replayQueue)
-            {
-                System.out.println(m);
-            }
-        }
-        System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+    {        
         try
         {
             Iterator<MessageImpl> it = _replayQueue.iterator();
@@ -696,50 +663,9 @@ public class MessageConsumerImpl implements MessageConsumer
                 if (m.getTransferId() <= threshold)
                 {
                     range.add(m.getTransferId());
-                    it.remove();
-                    if (m.getTransferId()  == 1)
-                    {
-                        System.out.println("xxxxTransfer I : " + this.toString());
-                        System.out.println(_prevMsg == null ? "" : _prevMsg);
-                        System.out.println(m);
-                        _prevMsg = m;
-                    }
+                    it.remove();     
                 }
             }
-            
-            if (range.size() == 0 || range.getFirst().getLower() == 1)
-            {
-                if (_prevRange!= null && _prevRange.size() > 0 && _prevRange.getFirst().getLower() == 1)
-                {                    
-                    System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
-                    System.out.println("Problem here !!!!!!!!" + this.toString());
-                    fullDump(true);
-                    System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");                    
-                    
-                }
-                else
-                {  
-                    System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
-                    System.out.println("RangeSet is one : " + range);                    
-                    fullDump(false);
-                    System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
-                }
-            }
-                        
-            _prevRange = range;
-            
-            System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
-            System.out.println("RangeSet : " + range);
-            System.out.println("Replay Queue size (should be zero) : " + _replayQueue.size());
-            if (_replayQueue.size() > 0)
-            {
-                for (MessageImpl m: _replayQueue)
-                {
-                    System.out.println(m);
-                }
-                fullDump(true);
-            }
-            System.out.println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
         }
         catch (Exception e)
         {

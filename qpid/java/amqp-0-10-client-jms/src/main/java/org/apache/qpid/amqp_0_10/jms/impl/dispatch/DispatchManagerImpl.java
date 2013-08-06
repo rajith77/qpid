@@ -174,7 +174,6 @@ public class DispatchManagerImpl implements DispatchManager<Session>
         if (!_closed.get())
         {
             Dispatcher<Session> dispatcher = _dispatcherMap.get(key);
-            System.out.println("Stop Dispatcher : " + _dispatcherMap);
             if (dispatcher != null)
             {
                 if (!dispatcher.isDispatcherStopped())
