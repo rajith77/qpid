@@ -132,7 +132,7 @@ public class DispatchManagerImpl implements DispatchManager<Session>
             }
             else
             {
-                _logger.warn("The session has been closed. Not session to dispatch dispatchable : " + dispatchable);
+                _logger.warn("The session has been closed. No session to dispatch message : " + dispatchable);
             }
         }
     }

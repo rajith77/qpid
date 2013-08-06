@@ -320,7 +320,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
 
         requeueMessages(requeueList);
-        //sortDispatchQueue();
+        // sortDispatchQueue();
 
         for (MessageConsumerImpl cons : _consumers.values())
         {
@@ -360,7 +360,8 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             requeueList.addAll(cons.getUnackedMessagesForRequeue());
 
             MessageImpl currentMsg = cons.getCurrentMessage();
-            if (_ackMode == AcknowledgeMode.AUTO_ACK && Thread.currentThread() == _dispatcherThread && currentMsg != null)
+            if (_ackMode == AcknowledgeMode.AUTO_ACK && Thread.currentThread() == _dispatcherThread
+                    && currentMsg != null)
             {
                 currentMsg.setJMSRedelivered(true);
                 requeueList.add(currentMsg);
@@ -368,7 +369,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         }
 
         requeueMessages(requeueList);
-        //sortDispatchQueue();
+        // sortDispatchQueue();
 
         for (MessageConsumerImpl cons : _consumers.values())
         {
@@ -906,8 +907,8 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         {
             throw ExceptionHelper.toJMSException("Error releasing messages.", e);
         }
-        
-        //_conn.requeueMessages(this, list);
+
+        // _conn.requeueMessages(this, list);
     }
 
     void sortDispatchQueue()

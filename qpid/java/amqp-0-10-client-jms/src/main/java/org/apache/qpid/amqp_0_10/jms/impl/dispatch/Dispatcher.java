@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -39,7 +40,7 @@ public class Dispatcher<K> implements Runnable
 
     private final ConditionManager _dispatcherShutdown = new ConditionManager(false);
 
-    private final LinkedBlockingQueue<Dispatchable<K>> _dispatchQueue = new LinkedBlockingQueue<Dispatchable<K>>();
+    private final BlockingQueue<Dispatchable<K>> _dispatchQueue = new LinkedBlockingQueue<Dispatchable<K>>();
 
     private Thread _thread;
 
@@ -51,11 +52,11 @@ public class Dispatcher<K> implements Runnable
     {
         try
         {
-            _dispatchQueue.put(dispatchable);
+            _dispatchQueue.put(dispatchable);            
         }
         catch (InterruptedException e)
         {
-            // TODO
+            System.out.println("dispatch-queue interrupted : " + _dispatchQueue.size());
         }
     }
 
@@ -169,5 +170,11 @@ public class Dispatcher<K> implements Runnable
     public Thread getThread()
     {
         return _thread;
+    }
+    
+    @Override
+    public String toString()
+    {
+        return _thread.getName();
     }
 }
