@@ -22,6 +22,7 @@ package org.apache.qpid.amqp_0_10.jms.impl;
 
 import org.apache.qpid.client.AMQConnectionURL;
 import org.apache.qpid.configuration.ClientProperties;
+import org.apache.qpid.jms.ConnectionURL;
 import org.apache.qpid.transport.util.Logger;
 
 /**
@@ -55,8 +56,17 @@ public class ConnectionConfig
 
     public int getDispatcherCount()
     {
-        // TODO if connection property not null return that else, get the
-        // default.
+        if (_url.getOption(ConnectionURL.OPTIONS_DISPATCHER_COUNT) != null)
+        {
+            try
+            {
+                return Integer.parseInt(_url.getOption(ConnectionURL.OPTIONS_DISPATCHER_COUNT));
+            }
+            catch (NumberFormatException e)
+            {
+                _logger.warn(e, "Invalid value for option '" + ConnectionURL.OPTIONS_DISPATCHER_COUNT + "'");
+            }
+        }
         return Integer.getInteger(ClientProperties.QPID_DISPATCHER_COUNT, ClientProperties.DEFAULT_DISPATCHER_COUNT);
     }
 

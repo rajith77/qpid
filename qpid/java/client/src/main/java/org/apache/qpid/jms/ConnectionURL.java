@@ -41,6 +41,7 @@ public interface ConnectionURL
     public static final String OPTIONS_BROKERLIST = "brokerlist";
     public static final String OPTIONS_FAILOVER = "failover";
     public static final String OPTIONS_FAILOVER_CYCLE = "cyclecount";
+    public static final String OPTIONS_DISPATCHER_COUNT = "dispatchers";
 
     /**
      * This option is used to apply a connection level override of
