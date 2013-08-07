@@ -774,9 +774,10 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
     @Override
     public void clearProperties() throws JMSException
     {
+        _msgReadOnly = false;
         if (_messageProps.getApplicationHeaders() != null)
         {
-            _messageProps.clearApplicationHeaders();
+            //_messageProps.clearApplicationHeaders(); TODO
         }
     }
 

@@ -22,7 +22,7 @@ package org.apache.qpid.util;
 
 public class ConditionManager
 {
-    final Object _lock = new Object();
+    private final Object _lock = new Object();
 
     private boolean _value;
 
@@ -31,7 +31,6 @@ public class ConditionManager
     public ConditionManager(boolean initialValue)
     {
         _value = initialValue;
-        _continue = true;
     }
 
     public void setValueAndNotify(boolean value)
@@ -52,14 +51,6 @@ public class ConditionManager
         {
             _continue = false;
             _lock.notifyAll();
-        }
-    }
-
-    public void resetToContinue()
-    {
-        synchronized (_lock)
-        {
-            _continue = true;
         }
     }
 
@@ -110,6 +101,7 @@ public class ConditionManager
         {
             long start = 0;
             long elapsed = 0;
+            _continue = true;
             while ((_value != expected) && _continue)
             {
                 if (timeout > 0)

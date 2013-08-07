@@ -28,6 +28,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.qpid.amqp_0_10.jms.impl.MessageImpl;
 import org.apache.qpid.util.ConditionManager;
 
 public class Dispatcher<K> implements Runnable
@@ -52,7 +53,7 @@ public class Dispatcher<K> implements Runnable
     {
         try
         {
-            _dispatchQueue.put(dispatchable);            
+            _dispatchQueue.put(dispatchable);
         }
         catch (InterruptedException e)
         {
@@ -171,7 +172,7 @@ public class Dispatcher<K> implements Runnable
     {
         return _thread;
     }
-    
+
     @Override
     public String toString()
     {

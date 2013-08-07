@@ -192,8 +192,7 @@ public class MessageConsumerImpl implements MessageConsumer
                     _session.requeueMessage(_localQueue.poll());
                 }
             }
-
-            if (isPrefetchDisabled())
+            else if (isPrefetchDisabled())
             {
                 setMessageCredit(1);
             }
@@ -364,7 +363,7 @@ public class MessageConsumerImpl implements MessageConsumer
         else if (_msgDeliveryStopped.getCurrentValue())
         {
             // We may have been woken up from the wait, but delivery is still
-            // stopped.
+            // stopped.            
             _session.requeueMessage(m);
         }
         else

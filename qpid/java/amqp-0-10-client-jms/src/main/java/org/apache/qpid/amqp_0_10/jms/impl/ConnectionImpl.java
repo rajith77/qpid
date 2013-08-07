@@ -723,8 +723,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             try
             {
                 if (_sessions.get(ssn) == null)
-                {
-                    
+                {                    
                     _logger.warn("Error! No matching session " + ssn);
                 }
                 
