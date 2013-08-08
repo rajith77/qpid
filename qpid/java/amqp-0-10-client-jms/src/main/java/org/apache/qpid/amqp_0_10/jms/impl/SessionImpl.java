@@ -174,7 +174,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             // Remove any old associations if present.
             _conn.removeSession(this, false);
             _amqpSession = _conn.getAMQPConnection().createSession(1);
-            _conn.addSession(this);
+            _conn.mapSession(this, _amqpSession);
         }
         catch (ConnectionException ce)
         {
@@ -324,10 +324,6 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
         for (MessageConsumerImpl cons : _consumers.values())
         {
-            if (Thread.currentThread() == _dispatcherThread)
-            {
-                cons.setRedeliverCurrentMessage(false);
-            }
             cons.startMessageDelivery();
         }
 
@@ -1000,15 +996,12 @@ public class SessionImpl implements Session, QueueSession, TopicSession
     private void startMessageDelivery()
     {
         _msgDeliveryStopped.setValueAndNotify(false);
-        _conn.startDispatcherForSession(this);
     }
 
     private void stopMessageDelivery()
     {
         if (Thread.currentThread() != _dispatcherThread)
-        {
-            _conn.stopDispatcherForSession(this);
-
+        {            
             _msgDeliveryStopped.setValueAndNotify(true);
             _msgDeliveryStopped.wakeUpAndReturn();
             _msgDeliveryInProgress.waitUntilFalse();

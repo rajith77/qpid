@@ -91,8 +91,6 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private int _unsentCompletions = 0;
 
-    private int _lastTransferId = 0;
-
     private MessageImpl _currentMsg = null;
 
     protected MessageConsumerImpl(String consumerId, SessionImpl ssn, DestinationImpl dest, String selector,
@@ -600,9 +598,8 @@ public class MessageConsumerImpl implements MessageConsumer
     // In 0-10 completions affects message credit
     void sendCompleted(MessageImpl m)
     {
-        if (m.getId() > _lastTransferId)
-        {
-            _lastTransferId = m.getId();
+        //if (m.getId() > _lastTransferId)
+        //{
             _unsentCompletions++;
             _completions.add(m.getTransferId());
             if (_capacity == 0 || _unsentCompletions > _capacity / 2)
@@ -610,13 +607,13 @@ public class MessageConsumerImpl implements MessageConsumer
                 for (final Range range : _completions)
                 {
                     _session.getAMQPSession().processed(range);
+                    System.out.println("Consumer : " + _consumerId + "unsent_completion_count = " + _unsentCompletions + "****************** Sent processed " + range);
                 }
                 _session.getAMQPSession().flushProcessed(BATCH);
                 _completions.clear();
                 _unsentCompletions = 0;
-                _lastTransferId = 0;
             }
-        }
+        //}
     }
 
     void sendMessageAccept(MessageImpl m, boolean sync) throws JMSException
@@ -883,7 +880,7 @@ public class MessageConsumerImpl implements MessageConsumer
     {
         System.out.println("****************************************************");
         System.out.println("************ Consumer Dump **************");
-        System.out.println("Dest " + _dest);
+        System.out.println("Id " + _consumerId);
 
         RangeSet range = RangeSetFactory.createRangeSet();
         for (MessageImpl m : _replayQueue)

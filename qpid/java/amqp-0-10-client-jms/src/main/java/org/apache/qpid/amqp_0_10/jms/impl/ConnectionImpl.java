@@ -26,6 +26,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 
 import javax.jms.ConnectionConsumer;
@@ -98,8 +99,10 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     private org.apache.qpid.transport.Connection _amqpConnection;
 
-    private final Map<org.apache.qpid.transport.Session, SessionImpl> _sessions = new ConcurrentHashMap<org.apache.qpid.transport.Session, SessionImpl>();
+    private final Map<org.apache.qpid.transport.Session, SessionImpl> _sessionMap = new ConcurrentHashMap<org.apache.qpid.transport.Session, SessionImpl>();
 
+    private final List<SessionImpl> _sessions = new CopyOnWriteArrayList<SessionImpl>();
+    
     private final List<TemporaryQueue> _tempQueues = new ArrayList<TemporaryQueue>();
 
     private volatile State _state = State.UNCONNECTED;
@@ -221,7 +224,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 _failoverManager.connect();
             }
             SessionImpl ssn = new SessionImpl(this, ackMode);
-
+            _sessions.add(ssn);
             if (_state == State.STARTED)
             {
                 ssn.start();
@@ -286,7 +289,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             {
                 _state = State.STARTED;
 
-                for (SessionImpl session : _sessions.values())
+                for (SessionImpl session : _sessions)
                 {
                     session.start();
                 }
@@ -309,7 +312,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 _state = State.STOPPED;
                 _dispatchManager.stop();
 
-                for (SessionImpl session : _sessions.values())
+                for (SessionImpl session : _sessions)
                 {
                     session.stop();
                 }
@@ -461,10 +464,11 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
                 try
                 {
-                    for (SessionImpl session : _sessions.values())
+                    for (SessionImpl session : _sessions)
                     {
                         session.closeImpl(sendClose, false);
                     }
+                    _sessionMap.clear();
                     _sessions.clear();
 
                     if (sendClose)
@@ -499,7 +503,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     void preFailover() throws JMSException
     {
         _dispatchManager.markStop();
-        for (SessionImpl ssn : _sessions.values())
+        for (SessionImpl ssn : _sessions)
         {
             ssn.preFailover();
         }
@@ -508,7 +512,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     void postFailover() throws JMSException
     {
-        for (SessionImpl ssn : _sessions.values())
+        for (SessionImpl ssn : _sessions)
         {
             ssn.postFailover();
         }
@@ -517,7 +521,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     void markAsClosing()
     {
-        for (SessionImpl ssn : _sessions.values())
+        for (SessionImpl ssn : _sessions)
         {
             ssn.markAsClosing();
         }
@@ -530,24 +534,21 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         return _amqpConnection;
     }
 
-    void addSession(SessionImpl session)
+    void mapSession(SessionImpl session, org.apache.qpid.transport.Session amqpSession)
     {
-        synchronized (_lock)
-        {
-            _sessions.put(session.getAMQPSession(), session);
-            _dispatchManager.register(session.getAMQPSession());
-        }
+        _sessionMap.put(amqpSession, session);
+        _dispatchManager.register(session.getAMQPSession());
     }
 
     void removeSession(SessionImpl session, boolean waitUntilDispatcherStopped)
     {
         synchronized (_lock)
         {
+            _sessions.remove(session);
             org.apache.qpid.transport.Session ssn = session.getAMQPSession();
             if (ssn != null)
             {
-                //ssn.setSessionListener(null);
-                _sessions.remove(ssn);
+                _sessionMap.remove(ssn);
                 _dispatchManager.unregister(ssn, waitUntilDispatcherStopped);
             }
         }
@@ -722,13 +723,15 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         {
             try
             {
-                if (_sessions.get(ssn) == null)
+                if (_sessionMap.get(ssn) == null)
                 {                    
                     _logger.warn("Error! No matching session " + ssn);
                 }
-                
-                MessageImpl msg = (MessageImpl) _messageFactory.createMessage(_sessions.get(ssn), xfr);
-                _dispatchManager.dispatch(msg);
+                else
+                {
+                    MessageImpl msg = (MessageImpl) _messageFactory.createMessage(_sessionMap.get(ssn), xfr);
+                    _dispatchManager.dispatch(msg);
+                }
             }
             catch (Exception e)
             {
@@ -742,7 +745,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     {
         if (_state != State.CLOSED)
         {
-            SessionImpl ssn = _sessions.get(session);
+            SessionImpl ssn = _sessionMap.get(session);
             ssn.setException(exception);
             // TODO notify session exception via ExceptionListener
         }
@@ -753,7 +756,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     {
         if (_state != State.CLOSED)
         {
-            SessionImpl ssn = _sessions.get(session);
+            SessionImpl ssn = _sessionMap.get(session);
 
             if (ssn != null && ssn.getException() != null)
             {
@@ -775,7 +778,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     {
         if (_state != State.CLOSED)
         {
-            SessionImpl ssn = _sessions.get(session);
+            SessionImpl ssn = _sessionMap.get(session);
             if (ssn != null)
             {
                 ssn.commandCompleted(commandId);

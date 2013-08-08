@@ -28,11 +28,13 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.apache.qpid.amqp_0_10.jms.impl.MessageImpl;
+import org.apache.qpid.transport.util.Logger;
 import org.apache.qpid.util.ConditionManager;
 
 public class Dispatcher<K> implements Runnable
 {
+    private static final Logger _logger = Logger.get(Dispatcher.class);
+    
     private final AtomicBoolean _continue = new AtomicBoolean(true);
 
     private final AtomicBoolean _stopped = new AtomicBoolean(false);
@@ -89,6 +91,10 @@ public class Dispatcher<K> implements Runnable
                 }
 
             }
+        }
+        catch (Exception e)
+        {
+            _logger.debug(e, "Dispatch : " + _thread.getName() + " exited due to error : " + e.getMessage());
         }
         finally
         {
