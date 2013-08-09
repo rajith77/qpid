@@ -78,9 +78,15 @@ public class Drain extends OptionParser
         
         while ((msg = consumer.receive(timeout)) != null)
         {
-            System.out.println("\n------------- Msg -------------");
+            /*System.out.println("\n------------- Msg -------------");
             System.out.println(msg);
-            System.out.println("-------------------------------\n");
+            System.out.println("-------------------------------\n");*/
+            
+            i++;
+            if (i%1000 == 0)
+            {
+                System.out.println("Received " + i + " messages so far");
+            }
 
             if (count > 0) {
                 if (++i == count) {
@@ -88,6 +94,7 @@ public class Drain extends OptionParser
                 }               
             }            
         }
+        System.out.println("Received " + i + " messages in total");
         consumer.close();
         ssn.close();
         con.close();
