@@ -96,9 +96,13 @@ public class Spout extends OptionParser
         {
             Message msg = createMessage(ssn);
             producer.send(msg);
-            System.out.println("\n------------- Msg -------------");
+            /*System.out.println("\n------------- Msg -------------");
             System.out.println(msg);
-            System.out.println("-------------------------------\n");
+            System.out.println("-------------------------------\n");*/
+            if (i%1000 == 0)
+            {
+                System.out.println("Sent " + i + " messages so far");
+            }
         }
         producer.close();
         ssn.close();

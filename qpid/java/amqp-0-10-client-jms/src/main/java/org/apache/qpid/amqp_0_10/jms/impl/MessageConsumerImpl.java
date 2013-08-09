@@ -36,6 +36,7 @@ import javax.jms.MessageConsumer;
 import javax.jms.MessageListener;
 
 import org.apache.qpid.amqp_0_10.jms.impl.AddressResolution.CheckMode;
+import org.apache.qpid.amqp_0_10.jms.impl.dispatch.Dispatchable;
 import org.apache.qpid.transport.MessageCreditUnit;
 import org.apache.qpid.transport.MessageFlowMode;
 import org.apache.qpid.transport.Option;
@@ -74,6 +75,8 @@ public class MessageConsumerImpl implements MessageConsumer
     private final AtomicBoolean _closing = new AtomicBoolean(false);
 
     private final AtomicBoolean _closed = new AtomicBoolean(false);
+    
+    private final AtomicBoolean _failoverInProgress = new AtomicBoolean(false);
 
     private final ConditionManager _msgDeliveryInProgress = new ConditionManager(false);
 
@@ -81,6 +84,8 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private final AtomicBoolean _redeliverCurrentMsg = new AtomicBoolean(false);
 
+    private final AtomicBoolean _discardCurrentMsg = new AtomicBoolean(false);
+    
     private String _subscriptionQueue;
 
     private volatile MessageListener _msgListener;
@@ -361,8 +366,16 @@ public class MessageConsumerImpl implements MessageConsumer
         else if (_msgDeliveryStopped.getCurrentValue())
         {
             // We may have been woken up from the wait, but delivery is still
-            // stopped.            
-            _session.requeueMessage(m);
+            // stopped.
+            if (_failoverInProgress.get())
+            {
+              //drop it on the floor as it will be re-delivered by the broker.
+                return;
+            }
+            else
+            {
+                _session.requeueMessage(m);
+            }
         }
         else
         {
@@ -373,6 +386,11 @@ public class MessageConsumerImpl implements MessageConsumer
         {
             if (_msgListener != null)
             {
+                if (_failoverInProgress.get())
+                {
+                  //drop it on the floor as it will be re-delivered by the broker.
+                    return;
+                }
                 _dispatcherThread = Thread.currentThread();
                 _currentMsg = m;
                 preDeliver(m);
@@ -390,17 +408,20 @@ public class MessageConsumerImpl implements MessageConsumer
 
                 try
                 {
-                    if (isPrefetchDisabled())
+                    if (!_failoverInProgress.get())
                     {
-                        setMessageCredit(1);
-                    }
-                    try
-                    {
-                        postDeliver(m);
-                    }
-                    catch (Exception e)
-                    {
-                        fullDump(true);
+                        if (isPrefetchDisabled())
+                        {
+                            setMessageCredit(1);
+                        }
+                        try
+                        {
+                            postDeliver(m);
+                        }
+                        catch (Exception e)
+                        {
+                            fullDump(true);
+                        }
                     }
                 }
                 catch (JMSException e)
@@ -444,6 +465,13 @@ public class MessageConsumerImpl implements MessageConsumer
 
     void postDeliver(MessageImpl m) throws JMSException
     {
+        if (_discardCurrentMsg.get())
+        {
+            // This messages from before failover.
+            _discardCurrentMsg.set(false);
+            return;
+        }
+        
         sendCompleted(m);
         switch (_ackMode)
         {
@@ -514,17 +542,23 @@ public class MessageConsumerImpl implements MessageConsumer
      */
     void preFailover()
     {
+        _failoverInProgress.set(true);
         _msgDeliveryStopped.setValueAndNotify(true);
         _msgDeliveryStopped.wakeUpAndReturn();
         if (_msgListener == null)
         {
             waitForInProgressDeliveriesToStop();
         }
+        if (_msgDeliveryInProgress.getCurrentValue())
+        {
+            _discardCurrentMsg.set(true);
+        }
         clearLocalAndReplayQueue();
     }
 
     void postFailover() throws JMSException
     {
+        _failoverInProgress.set(false);
         createSubscription();
         if (_session.isStarted())
         {
@@ -606,8 +640,22 @@ public class MessageConsumerImpl implements MessageConsumer
             {
                 for (final Range range : _completions)
                 {
-                    _session.getAMQPSession().processed(range);
-                    System.out.println("Consumer : " + _consumerId + "unsent_completion_count = " + _unsentCompletions + "****************** Sent processed " + range);
+                    try
+                    {
+                        _session.getAMQPSession().processed(range);
+                    }
+                    catch (Exception e)
+                    {
+                        System.out.println("================= Transfer id is higher than commands-in =================");
+                        System.out.println("_completions : " + _completions);
+                        System.out.println("Consumer ID : " + _consumerId);
+                        System.out.println("Destination : " + m.getConsumerId());
+                        System.out.println("Transfer-id : " + m.getTransferId());
+                        System.out.println("Key : " + ((Dispatchable)m).getKey());
+                        System.out.println("Session : " + _session.getAMQPSession().getName());
+                        System.out.println("============================================");
+                    }
+                    System.out.println("Consumer : " + _consumerId + ", unsent_completion_count = " + _unsentCompletions + "****************** Sent processed " + range);
                 }
                 _session.getAMQPSession().flushProcessed(BATCH);
                 _completions.clear();
