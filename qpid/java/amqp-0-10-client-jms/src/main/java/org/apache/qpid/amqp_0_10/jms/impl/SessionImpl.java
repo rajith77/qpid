@@ -172,7 +172,10 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         try
         {
             // Remove any old associations if present.
-            _conn.removeSession(this, false);
+            if (_amqpSession != null)
+            {
+                _conn.unmapSession(this, _amqpSession, false);
+            }
             _amqpSession = _conn.getAMQPConnection().createSession(1);
             _conn.mapSession(this, _amqpSession);
         }

@@ -540,17 +540,22 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         _dispatchManager.register(session.getAMQPSession());
     }
 
+    void unmapSession(SessionImpl session, org.apache.qpid.transport.Session amqpSession, boolean waitUntilDispatcherStopped)
+    {
+        if (amqpSession != null)
+        {
+            _sessionMap.remove(amqpSession);
+            _dispatchManager.unregister(amqpSession, waitUntilDispatcherStopped);
+        }
+    }
+
     void removeSession(SessionImpl session, boolean waitUntilDispatcherStopped)
     {
         synchronized (_lock)
         {
             _sessions.remove(session);
             org.apache.qpid.transport.Session ssn = session.getAMQPSession();
-            if (ssn != null)
-            {
-                _sessionMap.remove(ssn);
-                _dispatchManager.unregister(ssn, waitUntilDispatcherStopped);
-            }
+            unmapSession(session, ssn, waitUntilDispatcherStopped);
         }
     }
 

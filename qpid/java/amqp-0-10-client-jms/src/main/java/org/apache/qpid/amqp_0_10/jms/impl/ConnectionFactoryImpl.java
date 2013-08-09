@@ -118,7 +118,8 @@ public class ConnectionFactoryImpl implements ConnectionFactory, QueueConnection
         }
         catch (JMSException ex)
         {
-            if (ex.getCause() instanceof ProtocolVersionException)
+            throw ex;
+            /*if (ex.getCause() instanceof ProtocolVersionException)
             {
                 try
                 {
@@ -132,7 +133,7 @@ public class ConnectionFactoryImpl implements ConnectionFactory, QueueConnection
             else
             {
                 throw ex;
-            }
+            }*/
         }
     }
 }
