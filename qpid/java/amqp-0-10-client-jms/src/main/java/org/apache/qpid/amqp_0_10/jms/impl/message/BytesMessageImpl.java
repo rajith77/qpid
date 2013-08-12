@@ -49,7 +49,7 @@ public class BytesMessageImpl extends MessageImpl implements BytesMessage
             MessageProperties msgProps, ByteBuffer data)
     {
         super(ssn, transferId, consumerId, deliveryProps, msgProps);
-        _typedBytesContentReader = new TypedBytesContentReader(data);
+        _typedBytesContentReader = new TypedBytesContentReader(data == null ? MessageImpl.EMPTY_BYTE_BUFFER : data);
     }
 
     @Override
