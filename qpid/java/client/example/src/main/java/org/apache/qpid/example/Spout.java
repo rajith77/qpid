@@ -104,6 +104,7 @@ public class Spout extends OptionParser
                 System.out.println("Sent " + i + " messages so far");
             }
         }
+        System.out.println("Sent " + count + " messages in total");
         producer.close();
         ssn.close();
         con.close();
