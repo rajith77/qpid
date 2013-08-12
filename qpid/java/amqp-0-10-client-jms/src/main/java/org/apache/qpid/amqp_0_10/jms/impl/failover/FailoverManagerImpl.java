@@ -26,6 +26,7 @@ import org.apache.qpid.amqp_0_10.jms.Connection;
 import org.apache.qpid.amqp_0_10.jms.FailoverManager;
 import org.apache.qpid.amqp_0_10.jms.FailoverUnsuccessfulException;
 import org.apache.qpid.amqp_0_10.jms.impl.ConnectionImpl;
+import org.apache.qpid.jms.ConnectionURL;
 import org.apache.qpid.transport.util.Logger;
 
 public class FailoverManagerImpl implements FailoverManager
@@ -44,6 +45,13 @@ public class FailoverManagerImpl implements FailoverManager
 
     private int _currentBrokerRetries = 0;
 
+    private long _currentRetryInterval = 0;
+
+    private long _minRetryInterval = 0;
+
+    // Default 5 mins
+    private long _maxRetryInterval = 1000 * 60 * 5;
+
     private FailoverUnsuccessfulException _exception;
 
     @Override
@@ -51,6 +59,7 @@ public class FailoverManagerImpl implements FailoverManager
     {
         _conn = (ConnectionImpl) con;
         _failoverMethod = FailoverMethod.getFailoverMethod(_conn.getConfig().getURL().getFailoverMethod());
+        calculateFailoverIntervals();
         _brokers = getBrokerList();
         _currentBroker = getNextBrokerToConnect();
     }
@@ -89,20 +98,26 @@ public class FailoverManagerImpl implements FailoverManager
             {
                 if (_currentBroker.getConnectDelay() > 0)
                 {
-                    try
-                    {
-                        if (_logger.isDebugEnabled())
-                        {
-                            _logger.debug("Connection delay enabled. Sleeping for : "
-                                    + _currentBroker.getConnectDelay() + "ms");
-                        }
-                        Thread.sleep(_currentBroker.getConnectDelay());
-                    }
-                    catch (InterruptedException e)
-                    {
-                        // ignore
-                    }
+                    // For backwards compatibility. But log a warning.
+                    _logger.warn("Please use 'min_interval' and 'max_interval' failover properties instead of the 'connectdelay' broker property");
+                    _currentRetryInterval = _currentBroker.getConnectDelay();
                 }
+
+                try
+                {
+                    if (_logger.isDebugEnabled())
+                    {
+                        _logger.debug("Connection delay enabled. Sleeping for : " + _currentBroker.getConnectDelay()
+                                + "ms");
+                    }
+                    Thread.sleep(_currentBroker.getConnectDelay());
+                    calculateRetryInterval();
+                }
+                catch (InterruptedException e)
+                {
+                    // ignore
+                }
+
                 try
                 {
                     _currentBrokerRetries++;
@@ -149,5 +164,41 @@ public class FailoverManagerImpl implements FailoverManager
         default:
             return new URLBrokerList(_conn);
         }
+    }
+
+    void calculateRetryInterval()
+    {
+        if (_currentRetryInterval < _maxRetryInterval)
+        {
+            long interval = (long) ((long) 0.5 * Math.pow(_currentRetryInterval, 2));
+            _currentRetryInterval = Math.min(interval, _maxRetryInterval);
+        }
+    }
+
+    private void calculateFailoverIntervals()
+    {
+        try
+        {
+            String tmp = _conn.getConfig().getURL().getFailoverOption(ConnectionURL.OPTIONS_MIN_FAILOVER_INTERVAL);
+            _minRetryInterval = tmp == null ? 0 : Long.parseLong(tmp);
+        }
+        catch (NumberFormatException e)
+        {
+            _logger.error(e, "Option 'min_interval' contains a non integer value in Connection URL : "
+                    + _conn.getConfig().getURL());
+        }
+
+        try
+        {
+            String tmp = _conn.getConfig().getURL().getFailoverOption(ConnectionURL.OPTIONS_MAX_FAILOVER_INTERVAL);
+            _maxRetryInterval = tmp == null ? _maxRetryInterval : Long.parseLong(tmp);
+        }
+        catch (NumberFormatException e)
+        {
+            _logger.error(e, "Option 'min_interval' contains a non integer value in Connection URL : "
+                    + _conn.getConfig().getURL());
+        }
+
+        _currentRetryInterval = _minRetryInterval;
     }
 }
