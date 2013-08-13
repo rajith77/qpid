@@ -104,6 +104,47 @@ public class DefaultConnectionSettingsImpl implements ConnectionSettings
         _clientProperties = clientProps;
     }
 
+    protected DefaultConnectionSettingsImpl(String _protocol, String _host, String _vhost, String _username,
+            String _password, int _port, boolean _tcpNodelay, int _maxChannelCount, int _maxFrameSize,
+            int _heartbeatInterval, int _connectTimeout, int _readBufferSize, int _writeBufferSize, boolean _useSSL,
+            String _keyStorePath, String _keyStorePassword, String _keyStoreType, String _keyManagerFactoryAlgorithm,
+            String _trustManagerFactoryAlgorithm, String _trustStorePath, String _trustStorePassword,
+            String _trustStoreType, String _certAlias, boolean _verifyHostname, String _saslMechs,
+            String _saslProtocol, String _saslServerName, boolean _useSASLEncryption,
+            Map<String, Object> _clientProperties)
+    {
+        super();
+        this._protocol = _protocol;
+        this._host = _host;
+        this._vhost = _vhost;
+        this._username = _username;
+        this._password = _password;
+        this._port = _port;
+        this._tcpNodelay = _tcpNodelay;
+        this._maxChannelCount = _maxChannelCount;
+        this._maxFrameSize = _maxFrameSize;
+        this._heartbeatInterval = _heartbeatInterval;
+        this._connectTimeout = _connectTimeout;
+        this._readBufferSize = _readBufferSize;
+        this._writeBufferSize = _writeBufferSize;
+        this._useSSL = _useSSL;
+        this._keyStorePath = _keyStorePath;
+        this._keyStorePassword = _keyStorePassword;
+        this._keyStoreType = _keyStoreType;
+        this._keyManagerFactoryAlgorithm = _keyManagerFactoryAlgorithm;
+        this._trustManagerFactoryAlgorithm = _trustManagerFactoryAlgorithm;
+        this._trustStorePath = _trustStorePath;
+        this._trustStorePassword = _trustStorePassword;
+        this._trustStoreType = _trustStoreType;
+        this._certAlias = _certAlias;
+        this._verifyHostname = _verifyHostname;
+        this._saslMechs = _saslMechs;
+        this._saslProtocol = _saslProtocol;
+        this._saslServerName = _saslServerName;
+        this._useSASLEncryption = _useSASLEncryption;
+        this._clientProperties = _clientProperties;
+    }
+
     @Override
     public boolean isTcpNodelay()
     {
@@ -276,5 +317,40 @@ public class DefaultConnectionSettingsImpl implements ConnectionSettings
     public int getWriteBufferSize()
     {
         return _writeBufferSize;
+    }
+
+    @Override
+    public ConnectionSettings copy()
+    {
+        return new DefaultConnectionSettingsImpl(
+                this._protocol,
+                this._host,
+                this._vhost,
+                this._username,
+                this._password,
+                this._port,
+                this._tcpNodelay,
+                this._maxChannelCount,
+                this._maxFrameSize,
+                this._heartbeatInterval,
+                this._connectTimeout,
+                this._readBufferSize,
+                this._writeBufferSize,
+                this._useSSL,
+                this._keyStorePath,
+                this._keyStorePassword,
+                this._keyStoreType,
+                this._keyManagerFactoryAlgorithm,
+                this._trustManagerFactoryAlgorithm,
+                this._trustStorePath,
+                this._trustStorePassword,
+                this._trustStoreType,
+                this._certAlias,
+                this._verifyHostname,
+                this._saslMechs,
+                this._saslProtocol,
+                this._saslServerName,
+                this._useSASLEncryption,
+                this._clientProperties);
     }
 }

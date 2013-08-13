@@ -45,12 +45,11 @@ public class FailoverManagerImpl implements FailoverManager
 
     private int _currentBrokerRetries = 0;
 
-    private long _currentRetryInterval = 0;
-
-    private long _minRetryInterval = 0;
-
+    private long _minRetryInterval = 1000;
     // Default 5 mins
     private long _maxRetryInterval = 1000 * 60 * 5;
+
+    private long _lastRetryInterval = 0;
 
     private FailoverUnsuccessfulException _exception;
 
@@ -59,7 +58,7 @@ public class FailoverManagerImpl implements FailoverManager
     {
         _conn = (ConnectionImpl) con;
         _failoverMethod = FailoverMethod.getFailoverMethod(_conn.getConfig().getURL().getFailoverMethod());
-        calculateFailoverIntervals();
+        parseRetryIntervals();
         _brokers = getBrokerList();
         _currentBroker = getNextBrokerToConnect();
     }
@@ -67,7 +66,11 @@ public class FailoverManagerImpl implements FailoverManager
     @Override
     public void connect() throws FailoverUnsuccessfulException
     {
-        if (!initialConnAttempted)
+        if (initialConnAttempted)
+        {
+            reconnect();
+        }
+        else
         {
             initialConnAttempted = true;
             try
@@ -79,62 +82,80 @@ public class FailoverManagerImpl implements FailoverManager
             catch (FailoverUnsuccessfulException e)
             {
                 _exception = e;
-                connect();
+                reconnect();
             }
         }
+    }
 
-        switch (_failoverMethod)
+    void reconnect() throws FailoverUnsuccessfulException
+    {
+        if (_failoverMethod == FailoverMethod.NO_FAILOVER)
         {
-        case NO_FAILOVER:
             _logger.warn("Failover is disabled.");
             throw new FailoverUnsuccessfulException("Failover is disabled", _exception);
-        default:
-            if (_currentBroker == null)
+        }
+        else
+        {
+            int attempt = 0;
+            while (_currentBroker != null)
             {
-                throw new FailoverUnsuccessfulException(
-                        "Failover is Unsuccessful. No more brokers to connect to. Last exception linked", _exception);
-            }
-            else if (_currentBrokerRetries < _currentBroker.getRetries())
-            {
-                if (_currentBroker.getConnectDelay() > 0)
+                if (_currentBrokerRetries < _currentBroker.getRetries())
                 {
-                    // For backwards compatibility. But log a warning.
-                    _logger.warn("Please use 'min_interval' and 'max_interval' failover properties instead of the 'connectdelay' broker property");
-                    _currentRetryInterval = _currentBroker.getConnectDelay();
-                }
+                    attempt++;
+                    handleRetryInterval(attempt);
 
-                try
-                {
-                    if (_logger.isDebugEnabled())
+                    try
                     {
-                        _logger.debug("Connection delay enabled. Sleeping for : " + _currentBroker.getConnectDelay()
-                                + "ms");
+                        _currentBrokerRetries++;
+                        connectToBroker(_currentBroker);
+                        return;
                     }
-                    Thread.sleep(_currentBroker.getConnectDelay());
-                    calculateRetryInterval();
+                    catch (FailoverUnsuccessfulException e)
+                    {
+                        _exception = e;
+                    }
                 }
-                catch (InterruptedException e)
+                else
                 {
-                    // ignore
+                    _currentBroker = getNextBrokerToConnect();
+                    _currentBrokerRetries = -1;
                 }
+            }
 
-                try
-                {
-                    _currentBrokerRetries++;
-                    connectToBroker(_currentBroker);
-                }
-                catch (FailoverUnsuccessfulException e)
-                {
-                    _exception = e;
-                    connect();
-                }
-            }
-            else
-            {
-                _currentBroker = getNextBrokerToConnect();
-                _currentBrokerRetries = -1;
-                connect();
-            }
+            throw new FailoverUnsuccessfulException(
+                    "Failover is Unsuccessful. No more brokers to connect to. Last exception linked", _exception);
+        }
+    }
+
+    void handleRetryInterval(int attempt)
+    {
+        if (_currentBroker.getConnectDelay() > 0)
+        {
+            // Log a warning.
+            _logger.warn("'connectdelay' broker property is deprecated and hence ignored."
+                    + "A min_retry_interval of "
+                    + _minRetryInterval
+                    / 1000
+                    + " secs and max_retry_interval of "
+                    + _maxRetryInterval
+                    / 1000
+                    + " secs used instead."
+                    + "Please configure 'min_retry_interval' and 'max_retry_interval' connection properties to change the default");
+        }
+
+        long retryInterval = calculateRetryInterval(attempt);
+        if (_logger.isDebugEnabled())
+        {
+            _logger.debug("Retry Interval. Sleeping for : " + retryInterval / 1000 + " secs");
+        }
+        try
+        {
+            System.out.println("Retry Interval. Sleeping for : " + retryInterval / 1000 + " secs");
+            Thread.sleep(retryInterval);
+        }
+        catch (InterruptedException e)
+        {
+            // ignore
         }
     }
 
@@ -166,21 +187,26 @@ public class FailoverManagerImpl implements FailoverManager
         }
     }
 
-    void calculateRetryInterval()
+    long calculateRetryInterval(int attempt)
     {
-        if (_currentRetryInterval < _maxRetryInterval)
+        if (_lastRetryInterval < _maxRetryInterval)
         {
-            long interval = (long) ((long) 0.5 * Math.pow(_currentRetryInterval, 2));
-            _currentRetryInterval = Math.min(interval, _maxRetryInterval);
+            double e = 0.5*(Math.pow(2,attempt));
+            _lastRetryInterval = (long)e * _minRetryInterval;
+            return Math.min(_lastRetryInterval, _maxRetryInterval);
+        }
+        else
+        {
+            return _maxRetryInterval;
         }
     }
 
-    private void calculateFailoverIntervals()
+    void parseRetryIntervals()
     {
         try
         {
-            String tmp = _conn.getConfig().getURL().getFailoverOption(ConnectionURL.OPTIONS_MIN_FAILOVER_INTERVAL);
-            _minRetryInterval = tmp == null ? 0 : Long.parseLong(tmp);
+            String tmp = _conn.getConfig().getURL().getOption(ConnectionURL.OPTIONS_MIN_RETRY_INTERVAL);
+            _minRetryInterval = tmp == null ? _minRetryInterval : Long.parseLong(tmp) * 1000;
         }
         catch (NumberFormatException e)
         {
@@ -190,15 +216,13 @@ public class FailoverManagerImpl implements FailoverManager
 
         try
         {
-            String tmp = _conn.getConfig().getURL().getFailoverOption(ConnectionURL.OPTIONS_MAX_FAILOVER_INTERVAL);
-            _maxRetryInterval = tmp == null ? _maxRetryInterval : Long.parseLong(tmp);
+            String tmp = _conn.getConfig().getURL().getOption(ConnectionURL.OPTIONS_MAX_RETRY_INTERVAL);
+            _maxRetryInterval = tmp == null ? _maxRetryInterval : Long.parseLong(tmp) * 1000;
         }
         catch (NumberFormatException e)
         {
             _logger.error(e, "Option 'min_interval' contains a non integer value in Connection URL : "
                     + _conn.getConfig().getURL());
         }
-
-        _currentRetryInterval = _minRetryInterval;
     }
 }

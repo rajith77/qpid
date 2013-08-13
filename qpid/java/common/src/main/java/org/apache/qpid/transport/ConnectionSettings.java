@@ -84,4 +84,6 @@ public interface ConnectionSettings
     public int getReadBufferSize();
 
     public int getWriteBufferSize();
+
+    public ConnectionSettings copy();
 }

@@ -106,4 +106,9 @@ public class Broker
         return new Broker(settings, retries, connectDelay);
     }
 
+    @Override
+    public String toString()
+    {
+        return _settings.getProtocol() + "//" + _settings.getHost() + ":" + _settings.getPort();
+    }
 }

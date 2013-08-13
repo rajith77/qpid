@@ -27,6 +27,7 @@ import org.apache.qpid.client.AMQConnectionURL;
 import org.apache.qpid.configuration.ClientProperties;
 import org.apache.qpid.jms.BrokerDetails;
 import org.apache.qpid.jms.ConnectionURL;
+import org.apache.qpid.transport.ConnectionSettings;
 import org.apache.qpid.transport.DefaultConnectionSettingsImpl;
 import org.apache.qpid.transport.util.Logger;
 
@@ -122,6 +123,67 @@ public class ConnectionSettingsImpl extends DefaultConnectionSettingsImpl
         }
     }
 
+    ConnectionSettingsImpl(String _protocol, String _host, String _vhost, String _username, String _password,
+            int _port, boolean _tcpNodelay, int _maxChannelCount, int _maxFrameSize, int _heartbeatInterval,
+            int _connectTimeout, int _readBufferSize, int _writeBufferSize, boolean _useSSL, String _keyStorePath,
+            String _keyStorePassword, String _keyStoreType, String _keyManagerFactoryAlgorithm,
+            String _trustManagerFactoryAlgorithm, String _trustStorePath, String _trustStorePassword,
+            String _trustStoreType, String _certAlias, boolean _verifyHostname, String _saslMechs,
+            String _saslProtocol, String _saslServerName, boolean _useSASLEncryption,
+            Map<String, Object> _clientProperties)
+    {
+        super(_protocol, _host, _vhost, _username, _password, _port, _tcpNodelay, _maxChannelCount, _maxFrameSize,
+                _heartbeatInterval, _connectTimeout, _readBufferSize, _writeBufferSize, _useSSL, _keyStorePath,
+                _keyStorePassword, _keyStoreType, _keyManagerFactoryAlgorithm, _trustManagerFactoryAlgorithm, _trustStorePath,
+                _trustStorePassword, _trustStoreType, _certAlias, _verifyHostname, _saslMechs, _saslProtocol, _saslServerName,
+                _useSASLEncryption, _clientProperties);
+    }
+
+    void setHost(String host)
+    {
+        _host = host;
+    }
+
+    void setPort(int port)
+    {
+        _port = port;
+    }
+
+    @Override
+    public ConnectionSettings copy()
+    {
+        return new ConnectionSettingsImpl(
+                this._protocol,
+                this._host,
+                this._vhost,
+                this._username,
+                this._password,
+                this._port,
+                this._tcpNodelay,
+                this._maxChannelCount,
+                this._maxFrameSize,
+                this._heartbeatInterval,
+                this._connectTimeout,
+                this._readBufferSize,
+                this._writeBufferSize,
+                this._useSSL,
+                this._keyStorePath,
+                this._keyStorePassword,
+                this._keyStoreType,
+                this._keyManagerFactoryAlgorithm,
+                this._trustManagerFactoryAlgorithm,
+                this._trustStorePath,
+                this._trustStorePassword,
+                this._trustStoreType,
+                this._certAlias,
+                this._verifyHostname,
+                this._saslMechs,
+                this._saslProtocol,
+                this._saslServerName,
+                this._useSASLEncryption,
+                this._clientProperties);
+    }
+
     // The idle_timeout prop is in milisecs while
     // the new heartbeat prop is in secs
     private int getHeartbeatInterval(BrokerDetails brokerDetail)
@@ -150,6 +212,5 @@ public class ConnectionSettingsImpl extends DefaultConnectionSettingsImpl
             heartbeat = Integer.getInteger("amqj.heartbeat.delay", ClientProperties.HEARTBEAT_DEFAULT);
         }
         return heartbeat;
-    }
-
+    }    
 }

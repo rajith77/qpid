@@ -20,7 +20,7 @@ public class Test4
 
     public Test4() throws Exception
     {
-        String url = "amqp://username:password@clientid/test?failover='roundrobin?cyclecount='4''&brokerlist='tcp://localhost:5672;tcp://localhost:6672'";
+        String url = "amqp://username:password@clientid/test?failover='failover_exchange'&brokerlist='tcp://localhost:5672'";
         _con = new ConnectionImpl(url);
         _con.setExceptionListener(new ExceptionListener()
         {
@@ -166,5 +166,13 @@ public class Test4
             }
         });
         t.start();
+        
+        /*long start = 5000;
+        for (int i=0; i < 10; i++)
+        {
+            double e = 0.5*(Math.pow(2,i+1));
+            long value = (long)e*start;
+            System.out.println("e : " + e + " value : " + value/1000);
+        }*/
     }
 }

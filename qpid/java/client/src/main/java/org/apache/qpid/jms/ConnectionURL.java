@@ -41,8 +41,8 @@ public interface ConnectionURL
     public static final String OPTIONS_BROKERLIST = "brokerlist";
     public static final String OPTIONS_FAILOVER = "failover";
     public static final String OPTIONS_FAILOVER_CYCLE = "cyclecount";
-    public static final String OPTIONS_MIN_FAILOVER_INTERVAL = "min_interval";
-    public static final String OPTIONS_MAX_FAILOVER_INTERVAL = "max_interval";
+    public static final String OPTIONS_MIN_RETRY_INTERVAL = "min_retry_interval";
+    public static final String OPTIONS_MAX_RETRY_INTERVAL = "max_retry_interval";
     public static final String OPTIONS_DISPATCHER_COUNT = "dispatchers";
 
     /**

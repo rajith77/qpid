@@ -27,4 +27,8 @@ import org.apache.qpid.transport.ConnectionSettings;
 public interface Connection extends javax.jms.Connection
 {
     public void connect(ConnectionSettings settings) throws JMSException;
+
+    public void addListener(ConnectionListener l);
+
+    public void removeListener(ConnectionListener l);
 }
