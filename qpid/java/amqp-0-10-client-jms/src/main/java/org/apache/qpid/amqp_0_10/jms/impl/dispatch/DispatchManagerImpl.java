@@ -68,16 +68,11 @@ public class DispatchManagerImpl implements DispatchManager<Session>
     }
 
     @Override
-    public void unregister(Session key, boolean waitUntilStopped)
+    public void unregister(Session key)
     {
         Dispatcher<Session> dispatcher = _dispatcherMap.remove(key);
         if (dispatcher != null)
         {
-            if (waitUntilStopped)
-            {
-                dispatcher.signalDispatcherToStop();
-                dispatcher.waitForDispatcherToStop();
-            }
             dispatcher.drainQueue(key);
         }
     }
@@ -203,7 +198,7 @@ public class DispatchManagerImpl implements DispatchManager<Session>
 
     /** Marks as stopped, but doesn't wait for it to stop **/
     @Override
-    public void markStop()
+    public void markStopped()
     {
         if (!_closed.get())
         {

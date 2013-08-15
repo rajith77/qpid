@@ -18,31 +18,25 @@
  * under the License.
  *
  */
-package org.apache.qpid.amqp_0_10.jms.impl.dispatch;
+package org.apache.qpid.amqp_0_10.jms;
 
-public interface DispatchManager<K>
+public interface ConnectionListener
 {
-    public void register(K key);
+    public void opened(Connection con);
 
-    public void unregister(K key);
+    public void started(Connection con);
+    
+    public void stopped(Connection con);
+    
+    public void closed(Connection con);
 
-    public void dispatch(Dispatchable<K> dispatchable);
+    public void exception(Connection con, Exception exp);
 
-    public void requeue(K key, Dispatchable<K> dispatchable);
+    public void protocolConnectionCreated(Connection con);
 
-    public void sortDispatchQueue(K key);
+    public void protocolConnectionLost(Connection con);
 
-    public void stopDispatcher(K key);
+    public void preFailover(Connection con);
 
-    public void startDispatcher(K key);
-
-    public void clearDispatcherQueues();
-
-    public void start();
-
-    public void stop();
-
-    public void markStopped();
-
-    public void shutdown();
+    public void postFailover(Connection con);
 }

@@ -146,7 +146,7 @@ public class MessageConsumerImpl implements MessageConsumer
         {
             throw ExceptionHelper.toJMSException("Error creating consumer.", se);
         }
-        _logger.debug("Sucessfully created message consumer for : " + _dest);
+        _logger.warn("Sucessfully created message consumer for : " + _dest);
     }
 
     @Override
@@ -791,6 +791,7 @@ public class MessageConsumerImpl implements MessageConsumer
         try
         {
             _session.getAMQPSession().messageCancel(_consumerId);
+            _logger.warn("Subscription canceled for : " + _dest);
         }
         catch (Exception e)
         {

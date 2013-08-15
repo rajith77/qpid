@@ -290,7 +290,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     public void start() throws JMSException
     {
         synchronized (_lock)
-        {
+        {           
             checkClosed();
 
             if (_state == State.UNCONNECTED)
@@ -565,7 +565,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     // method----------------------
     void preFailover() throws JMSException
     {
-        _dispatchManager.markStop();
+        _dispatchManager.markStopped();
         for (SessionImpl ssn : _sessions)
         {
             ssn.preFailover();
@@ -603,23 +603,22 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         _dispatchManager.register(session.getAMQPSession());
     }
 
-    void unmapSession(SessionImpl session, org.apache.qpid.transport.Session amqpSession,
-            boolean waitUntilDispatcherStopped)
+    void unmapSession(SessionImpl session, org.apache.qpid.transport.Session amqpSession)
     {
         if (amqpSession != null)
         {
             _sessionMap.remove(amqpSession);
-            _dispatchManager.unregister(amqpSession, waitUntilDispatcherStopped);
+            _dispatchManager.unregister(amqpSession);
         }
     }
 
-    void removeSession(SessionImpl session, boolean waitUntilDispatcherStopped)
+    void removeSession(SessionImpl session)
     {
         synchronized (_lock)
         {
             _sessions.remove(session);
             org.apache.qpid.transport.Session ssn = session.getAMQPSession();
-            unmapSession(session, ssn, waitUntilDispatcherStopped);
+            unmapSession(session, ssn);
         }
     }
 
@@ -829,7 +828,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
             if (ssn != null && ssn.getException() != null)
             {
-                removeSession(ssn, true);
+                removeSession(ssn);
                 try
                 {
                     ssn.closeImpl(false, false);

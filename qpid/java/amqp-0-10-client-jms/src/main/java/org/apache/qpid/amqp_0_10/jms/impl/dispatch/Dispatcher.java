@@ -59,7 +59,7 @@ public class Dispatcher<K> implements Runnable
         }
         catch (InterruptedException e)
         {
-            System.out.println("dispatch-queue interrupted : " + _dispatchQueue.size());
+            _logger.warn("Dispatcher.add got interrupted", e);
         }
     }
 
@@ -134,7 +134,10 @@ public class Dispatcher<K> implements Runnable
 
     public void waitForDispatcherToStop()
     {
-        _dispatcherStarted.waitUntilFalse();
+        if (Thread.currentThread() != _thread)
+        {
+            _dispatcherStarted.waitUntilFalse();
+        }
     }
 
     public boolean isDispatcherStopped()

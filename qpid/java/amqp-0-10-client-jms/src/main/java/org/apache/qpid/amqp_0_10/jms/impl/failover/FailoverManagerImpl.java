@@ -143,14 +143,10 @@ public class FailoverManagerImpl implements FailoverManager
                     + "Please configure 'min_retry_interval' and 'max_retry_interval' connection properties to change the default");
         }
 
-        long retryInterval = calculateRetryInterval(attempt);
-        if (_logger.isDebugEnabled())
-        {
-            _logger.debug("Retry Interval. Sleeping for : " + retryInterval / 1000 + " secs");
-        }
+        long retryInterval = calculateRetryInterval(attempt);        
+        _logger.warn("Waiting for : " + retryInterval / 1000 + " secs before retrying connection to " + _currentBroker);
         try
         {
-            System.out.println("Retry Interval. Sleeping for : " + retryInterval / 1000 + " secs");
             Thread.sleep(retryInterval);
         }
         catch (InterruptedException e)

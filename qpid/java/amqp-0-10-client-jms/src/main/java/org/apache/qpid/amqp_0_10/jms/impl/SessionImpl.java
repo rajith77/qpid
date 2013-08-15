@@ -174,7 +174,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
             // Remove any old associations if present.
             if (_amqpSession != null)
             {
-                _conn.unmapSession(this, _amqpSession, false);
+                _conn.unmapSession(this, _amqpSession);
             }
             _amqpSession = _conn.getAMQPConnection().createSession(1);
             _conn.mapSession(this, _amqpSession);
@@ -220,7 +220,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
             if (unregister)
             {
-                _conn.removeSession(this, _dispatcherThread == Thread.currentThread());
+                _conn.removeSession(this);
             }
 
             cancelTimerTask();
@@ -250,8 +250,7 @@ public class SessionImpl implements Session, QueueSession, TopicSession
 
                 getAMQPSession().close();
             }
-
-            _conn.startDispatcherForSession(this);
+            _logger.warn("Session " + getAMQPSession().getName() +" is now closed");
         }
     }
 
