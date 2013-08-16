@@ -97,7 +97,7 @@ public class FailoverExchangeBrokerList implements BrokerList, ConnectionListene
     @Override
     public void onMessage(Message m)
     {
-        _logger.info("Failover exchange notification : cluster membership has changed!");
+        _logger.warn("Failover exchange notification : cluster membership has changed!");
 
         String currentBrokerIP = "";
         try
@@ -141,10 +141,7 @@ public class FailoverExchangeBrokerList implements BrokerList, ConnectionListene
                         }
                     }
                 }
-                if (_logger.isDebugEnabled())
-                {
-                    _logger.debug("Updated broker list : " + _brokerList);
-                }
+                _logger.warn("Updated broker list : " + _brokerList);
             }
         }
         catch (JMSException e)
