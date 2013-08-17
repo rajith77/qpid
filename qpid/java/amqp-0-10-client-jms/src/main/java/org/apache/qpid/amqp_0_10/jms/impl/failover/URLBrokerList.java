@@ -49,10 +49,10 @@ public class URLBrokerList implements BrokerList
         }
 
         String cycleOption = conn.getConfig().getURL().getFailoverOption(ConnectionURL.OPTIONS_FAILOVER_CYCLE);
-        int cycleCount = 0;
+        int cycleCount = -1;
         try
         {
-            cycleCount = cycleOption == null ? 0 : Integer.parseInt(cycleOption);
+            cycleCount = cycleOption == null ? -1 : Integer.parseInt(cycleOption);
         }
         catch (NumberFormatException e)
         {
@@ -67,7 +67,12 @@ public class URLBrokerList implements BrokerList
     {
         if (_currentBrokerIndex >= _brokers.size())
         {
-            if (_currentCycleCount < CYCLE_COUNT)
+            if (CYCLE_COUNT == -1)
+            {
+                _currentBrokerIndex = 0;
+                return getNextBroker();
+            }
+            else if (_currentCycleCount < CYCLE_COUNT)
             {
                 _currentBrokerIndex = 0;
                 _currentCycleCount++;

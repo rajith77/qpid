@@ -20,7 +20,8 @@ public class Test4
 
     public Test4() throws Exception
     {
-        String url = "amqp://username:password@clientid/test?failover='failover_exchange'&brokerlist='tcp://localhost:5672'";
+        //String url = "amqp://username:password@clientid/test?failover='failover_exchange'&brokerlist='tcp://localhost:5672?sasl_mechs='PLAIN''";
+        String url = "amqp://username:password@clientid/test?brokerlist='tcp://localhost:5672;tcp://localhost:6672;tcp://localhost:7672'";
         _con = new ConnectionImpl(url);
         _con.setExceptionListener(new ExceptionListener()
         {

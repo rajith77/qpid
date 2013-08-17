@@ -27,6 +27,7 @@ import org.apache.qpid.amqp_0_10.jms.FailoverManager;
 import org.apache.qpid.amqp_0_10.jms.FailoverUnsuccessfulException;
 import org.apache.qpid.amqp_0_10.jms.impl.ConnectionImpl;
 import org.apache.qpid.jms.ConnectionURL;
+import org.apache.qpid.transport.TransportException;
 import org.apache.qpid.transport.util.Logger;
 
 public class FailoverManagerImpl implements FailoverManager
@@ -81,8 +82,16 @@ public class FailoverManagerImpl implements FailoverManager
             }
             catch (FailoverUnsuccessfulException e)
             {
-                _exception = e;
-                reconnect();
+                Throwable t = e.getCause().getCause();
+                if (t.getClass() == TransportException.class)
+                {
+                    _exception = e;
+                    reconnect();
+                }
+                else
+                {
+                    throw e;
+                }
             }
         }
     }
@@ -133,17 +142,13 @@ public class FailoverManagerImpl implements FailoverManager
         {
             // Log a warning.
             _logger.warn("'connectdelay' broker property is deprecated and hence ignored."
-                    + "A min_retry_interval of "
-                    + _minRetryInterval
-                    / 1000
-                    + " secs and max_retry_interval of "
-                    + _maxRetryInterval
-                    / 1000
+                    + "A min_retry_interval of " + _minRetryInterval/1000
+                    + " secs and max_retry_interval of " + _maxRetryInterval/1000
                     + " secs used instead."
                     + "Please configure 'min_retry_interval' and 'max_retry_interval' connection properties to change the default");
         }
 
-        long retryInterval = calculateRetryInterval(attempt);        
+        long retryInterval = calculateRetryInterval(attempt);
         _logger.warn("Waiting for : " + retryInterval / 1000 + " secs before retrying connection to " + _currentBroker);
         try
         {
@@ -187,8 +192,8 @@ public class FailoverManagerImpl implements FailoverManager
     {
         if (_lastRetryInterval < _maxRetryInterval)
         {
-            double e = 0.5*(Math.pow(2,attempt));
-            _lastRetryInterval = (long)e * _minRetryInterval;
+            double e = 0.5 * (Math.pow(2, attempt));
+            _lastRetryInterval = (long) e * _minRetryInterval;
             return Math.min(_lastRetryInterval, _maxRetryInterval);
         }
         else
