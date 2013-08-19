@@ -106,6 +106,7 @@ public class FailoverManagerImpl implements FailoverManager
         else
         {
             int attempt = 0;
+            _lastRetryInterval = 0;
             while (_currentBroker != null)
             {
                 if (_currentBrokerRetries < _currentBroker.getRetries())
@@ -121,7 +122,15 @@ public class FailoverManagerImpl implements FailoverManager
                     }
                     catch (FailoverUnsuccessfulException e)
                     {
-                        _exception = e;
+                        Throwable t = e.getCause().getCause();
+                        if (t.getClass() == TransportException.class)
+                        {
+                            _exception = e;
+                        }
+                        else
+                        {
+                            throw e;
+                        }       
                     }
                 }
                 else
