@@ -550,6 +550,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 _logger.warn(e, "Exception during failover. Closing connection");
                 try
                 {
+                    _failoverInProgress.setValueAndNotify(false);
                     closeImpl(status == FailoverStatus.POST_FAILOVER_FAILED);
                 }
                 catch (JMSException e1)
