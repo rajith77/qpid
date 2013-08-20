@@ -548,6 +548,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             catch (Exception e)
             {
                 _logger.warn(e, "Exception during failover. Closing connection");
+                _logger.warn(e, "Closing connection outside of lock");
                 try
                 {
                     _failoverInProgress.setValueAndNotify(false);

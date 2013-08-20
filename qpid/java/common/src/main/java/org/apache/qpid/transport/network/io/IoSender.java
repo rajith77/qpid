@@ -24,6 +24,7 @@ import org.apache.qpid.transport.Sender;
 import org.apache.qpid.transport.SenderClosedException;
 import org.apache.qpid.transport.SenderException;
 import org.apache.qpid.transport.TransportException;
+import org.apache.qpid.transport.TransportFailureException;
 import org.apache.qpid.transport.util.Logger;
 
 import static org.apache.qpid.transport.util.Functions.mod;
@@ -32,7 +33,9 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -60,6 +63,7 @@ public final class IoSender implements Runnable, Sender<ByteBuffer>
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final Thread senderThread;
     private final List<Closeable> _listeners = new ArrayList<Closeable>();
+    private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
 
     private volatile Throwable exception = null;
 
@@ -89,7 +93,7 @@ public final class IoSender implements Runnable, Sender<ByteBuffer>
         }
 
         senderThread.setDaemon(true);
-        senderThread.setName(String.format("IoSender - %s", socket.getRemoteSocketAddress()));
+        senderThread.setName(String.format("IoSender - %s -%s", socket.getRemoteSocketAddress(), sdf.format(new Date())));
     }
 
     public void initiate()
@@ -109,6 +113,10 @@ public final class IoSender implements Runnable, Sender<ByteBuffer>
 
     public void send(ByteBuffer buf)
     {
+        if (exception != null && exception instanceof IOException)
+        {
+            throw new TransportFailureException("connection aborted", exception);
+        }
         if (closed.get())
         {
             throw new SenderClosedException("sender is closed", exception);

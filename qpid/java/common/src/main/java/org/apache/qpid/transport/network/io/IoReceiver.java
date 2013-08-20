@@ -34,6 +34,8 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -52,6 +54,8 @@ final class IoReceiver implements Runnable, Closeable
     private final long timeout;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final Thread receiverThread;
+    private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+
     private static final boolean shutdownBroken;
 
     private Ticker _ticker;
@@ -78,7 +82,7 @@ final class IoReceiver implements Runnable, Closeable
             throw new RuntimeException("Error creating IOReceiver thread",e);
         }
         receiverThread.setDaemon(true);
-        receiverThread.setName(String.format("IoReceiver - %s", socket.getRemoteSocketAddress()));
+        receiverThread.setName(String.format("IoReceiver - %s -%s", socket.getRemoteSocketAddress(), sdf.format(new Date())));
     }
 
     public void initiate()
@@ -143,10 +147,12 @@ final class IoReceiver implements Runnable, Closeable
         // I set the read buffer size similar to SO_RCVBUF
         // Haven't tested with a lower value to see if it's better or worse
         byte[] buffer = new byte[bufferSize];
+        int read = 0;
+        boolean exceptionNotified = false;
         try
         {
             InputStream in = socket.getInputStream();
-            int read = 0;
+            //int read = 0;
             int offset = 0;
             long currentTime;
             while(read != -1)
@@ -212,15 +218,19 @@ final class IoReceiver implements Runnable, Closeable
         }
         catch (Throwable t)
         {
-            t.printStackTrace();
             log.warn(t, "Exception in IoReceiver");
             if (shouldReport(t))
             {
+                exceptionNotified = true;
                 receiver.exception(t);
             }
         }
         finally
         {
+            if (read == -1 && !exceptionNotified)
+            {
+                receiver.exception(new TransportException("connection aborted"));
+            }
             try
             {
                 socket.close();
