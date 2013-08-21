@@ -40,7 +40,7 @@ public class ClientConnection extends Connection
     @Override
     public void send(ProtocolEvent event)
     {
-        _lastSendTime = System.currentTimeMillis();
+        _lastSendTime = System.currentTimeMillis();        
         if (log.isDebugEnabled())
         {
             log.debug("SEND: [%s] %s", this, event);
@@ -54,7 +54,7 @@ public class ClientConnection extends Connection
             }
             else
             {
-                throw new ConnectionException("connection closed", _exception);
+                throw new ConnectionException("connection-closed", _exception);
             }
         }
         try
@@ -110,11 +110,6 @@ public class ClientConnection extends Connection
     @Override
     public void closed()
     {
-        if (state == OPEN)
-        {
-            exception(new ConnectionException("connection aborted"));
-        }
-
         log.debug("connection closed: %s", this);
 
         synchronized (lock)
@@ -133,8 +128,8 @@ public class ClientConnection extends Connection
             {
                 // ignore.
             }
-            sender = null;
             setState(CLOSED);
+            sender = null;
         }
 
         for (ConnectionListener listener: listeners)

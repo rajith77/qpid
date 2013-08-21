@@ -68,7 +68,7 @@ public class Connection extends ConnectionInvoker
     //Usable channels are numbered 0 to <ChannelMax> - 1
     public static final int MAX_CHANNEL_MAX = 0xFFFF;
     public static final int MIN_USABLE_CHANNEL_NUM = 0;
-    private long _lastSendTime;
+    protected long _lastSendTime;
     private long _lastReadTime;
 
 
@@ -103,16 +103,16 @@ public class Connection extends ConnectionInvoker
     private SessionFactory _sessionFactory = DEFAULT_SESSION_FACTORY;
 
     private ConnectionDelegate delegate;
-    private Sender<ProtocolEvent> sender;
+    protected Sender<ProtocolEvent> sender;
 
     final private Map<Binary,Session> sessions = new HashMap<Binary,Session>();
-    final private Map<Integer,Session> channels = new HashMap<Integer,Session>();
+    final protected Map<Integer,Session> channels = new HashMap<Integer,Session>();
 
-    private State state = NEW;
-    final private Object lock = new Object();
+    protected State state = NEW;
+    final protected Object lock = new Object();
     private long timeout = 60000;
-    private List<ConnectionListener> listeners = new ArrayList<ConnectionListener>();
-    private ConnectionException error = null;
+    protected List<ConnectionListener> listeners = new ArrayList<ConnectionListener>();
+    protected ConnectionException error = null;
 
     private int channelMax = 1;
     private String locale;
@@ -124,7 +124,7 @@ public class Connection extends ConnectionInvoker
     private ConnectionSettings conSettings;
     private SecurityLayer securityLayer;
 
-    private final AtomicBoolean connectionLost = new AtomicBoolean(false);
+    protected final AtomicBoolean connectionLost = new AtomicBoolean(false);
 
     private SocketAddress _remoteAddress;
     private SocketAddress _localAddress;

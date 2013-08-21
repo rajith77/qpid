@@ -26,16 +26,22 @@ import java.nio.charset.CharacterCodingException;
 import javax.jms.JMSException;
 
 import org.apache.qpid.AMQException;
+import org.apache.qpid.amqp_0_10.jms.ConnectionFailedException;
 import org.apache.qpid.transport.ConnectionCloseCode;
 import org.apache.qpid.transport.ConnectionException;
 import org.apache.qpid.transport.ExecutionErrorCode;
 import org.apache.qpid.transport.SessionException;
+import org.apache.qpid.transport.TransportFailureException;
 import org.apache.qpid.typedmessage.TypedBytesFormatException;
 
 public class ExceptionHelper
 {
     public static JMSException toJMSException(String msg, Exception e)
     {
+        if (e instanceof TransportFailureException)
+        {
+            return new ConnectionFailedException(msg, e);
+        }
         if (e instanceof ConnectionException)
         {
             return toJMSException(msg, (ConnectionException) e);

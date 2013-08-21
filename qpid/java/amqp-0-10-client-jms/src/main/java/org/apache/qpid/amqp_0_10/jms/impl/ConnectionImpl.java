@@ -46,6 +46,7 @@ import javax.jms.TopicConnection;
 import javax.jms.TopicSession;
 
 import org.apache.qpid.amqp_0_10.jms.Connection;
+import org.apache.qpid.amqp_0_10.jms.ConnectionFailedException;
 import org.apache.qpid.amqp_0_10.jms.FailoverManager;
 import org.apache.qpid.amqp_0_10.jms.FailoverUnsuccessfulException;
 import org.apache.qpid.amqp_0_10.jms.MessageFactory;
@@ -68,6 +69,7 @@ import org.apache.qpid.transport.ProtocolVersionException;
 import org.apache.qpid.transport.SessionDetachCode;
 import org.apache.qpid.transport.SessionException;
 import org.apache.qpid.transport.TransportException;
+import org.apache.qpid.transport.TransportFailureException;
 import org.apache.qpid.transport.util.Logger;
 import org.apache.qpid.url.URLSyntaxException;
 import org.apache.qpid.util.ConditionManager;
@@ -81,12 +83,12 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     private static enum State
     {
-        UNCONNECTED, STOPPED, STARTED, CLOSED
+        UNCONNECTED, STOPPED, STARTED, CLOSING, CLOSED
     }
 
     private static enum FailoverStatus
     {
-        SUCCESSFUL, PRE_FAILOVER_FAILED, RECONNECTION_FAILED, POST_FAILOVER_FAILED
+        SUCCESSFUL, PRE_FAILOVER_FAILED, RECONNECTION_FAILED, CONN_FAILED_DURING_POST, POST_FAILOVER_FAILED
     }
 
     private static final AtomicLong CONN_NUMBER_GENERATOR = new AtomicLong(0);
@@ -161,7 +163,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             {
                 try
                 {
-                    _amqpConnection = new org.apache.qpid.transport.Connection();
+                    _amqpConnection = new org.apache.qpid.transport.ClientConnection();
                     _amqpConnection.addConnectionListener(this);
                     _amqpConnection.setSessionFactory(new ClientSessionFactory());
                     _amqpConnection.setConnectionDelegate(new ClientConnectionDelegate(settings, _config.getURL()));
@@ -183,10 +185,13 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 {
                     throw ExceptionHelper.toJMSException("Invalid Protocol Version", pe);
                 }
-                catch (TransportException ce)
+                catch (TransportFailureException pe)
                 {
-                    String msg = "Cannot connect to broker: " + ce.getMessage();
-                    throw ExceptionHelper.toJMSException(msg, ce);
+                    throw new ConnectionFailedException("Unable to connect to broker", pe);
+                }
+                catch (ConnectionException ce)
+                {
+                    throw ExceptionHelper.toJMSException("Error connecting to broker", ce);
                 }
             }
         }
@@ -411,171 +416,117 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     @Override
     public void closed(org.apache.qpid.transport.Connection connection)
     {
-        _failoverInProgress.waitUntilFalse();
-        if (_state == State.CLOSED)
-        {
-            _logger.warn("Connection already marked as closed. No failover is attempted.");
-        }
-
-        if (_connExceptionTimestamp < _connCreatedTimestamp)
-        {
-            _logger.warn("Connection has already failedover successfully. Ignoring the closed notification, that was invoked while failover was in progress");
-            return;
-        }
-
         JMSException closedException = null;
-        FailoverStatus status = FailoverStatus.SUCCESSFUL;
-        if (_exception == null)
+        synchronized (_lock)
         {
-            return;
-        }
-
-        
-        //Throwable t = _exception.getCause() == null ? _exception :  _exception.getCause().getCause();
-        //if (t.getClass() == TransportException.class)
-        //{
-            try
+            if (_state == State.CLOSED)
             {
-                _failoverInProgress.setValueAndNotify(true);
-    
-                synchronized (_lock)
+                _logger.warn("Connection already marked as closed. No failover is attempted.");
+                return;
+            }
+
+            /*if (_connExceptionTimestamp < _connCreatedTimestamp)
+            {
+                _logger.warn("Connection has already failedover successfully. Ignoring the spurious closed notification, that was invoked while failover was in progress");
+                return;
+            }*/
+
+            if (_exception != null && _exception instanceof TransportFailureException)
+            {
+                try
                 {
-                    boolean retry = true;
-                    while (retry)
+                    _failoverInProgress.setValueAndNotify(true);
+                    FailoverStatus status = FailoverStatus.SUCCESSFUL;
+                    // l.protocolConnectionLost(this);
+
+                    State prevState = _state;
+                    _state = State.UNCONNECTED;
+                    try
                     {
-                        for (org.apache.qpid.amqp_0_10.jms.ConnectionListener l : _listeners)
-                        {
-                            l.protocolConnectionLost(this);
-                        }
-    
-                        State prevState = _state;
-                        _state = State.UNCONNECTED;
+                        _logger.warn("Executing pre failover routine");
+                        // .preFailover(this);
+                        preFailover();
+                    }
+                    catch (JMSException e)
+                    {
+                        _logger.warn("Pre failover failed. Aborting failover", e);
+                        closedException = ExceptionHelper.toJMSException("Pre failover failed. Aborting failover", e);
+                        status = FailoverStatus.PRE_FAILOVER_FAILED;
+                    }
+
+                    if (status == FailoverStatus.SUCCESSFUL)
+                    {
                         try
                         {
-                            _logger.warn("Executing pre failover routine");
-                            for (org.apache.qpid.amqp_0_10.jms.ConnectionListener l : _listeners)
-                            {
-                                l.preFailover(this);
-                            }
-                            preFailover();
+                            _failoverManager.connect();
+                            _connCreatedTimestamp = System.currentTimeMillis();
+                            _state = prevState; // either START or STOPPED
+                        }
+                        catch (FailoverUnsuccessfulException e)
+                        {
+                            _logger.warn("All attempts at reconnection failed. Aborting failover", e);
+                            closedException = ExceptionHelper.toJMSException(
+                                    "All attempts at reconnection failed.", e);
+                            status = FailoverStatus.RECONNECTION_FAILED;
                         }
                         catch (JMSException e)
                         {
-                            retry = false;
-                            _logger.warn("Pre failover failed. Aborting failover", e);
-                            closedException = ExceptionHelper.toJMSException("Pre failover failed. Aborting failover", e);
-                            status = FailoverStatus.PRE_FAILOVER_FAILED;
+                            closedException = ExceptionHelper.toJMSException("Reconnection failed due to error", e);
+                            status = FailoverStatus.RECONNECTION_FAILED;
                         }
-    
-                        if (status == FailoverStatus.SUCCESSFUL)
-                        {
-                            try
-                            {
-                                _failoverManager.connect();
-                                _connCreatedTimestamp = System.currentTimeMillis();
-                                _state = prevState; // either START or STOPPED
-                            }
-                            catch (FailoverUnsuccessfulException e)
-                            {
-                                retry = false;
-                                _logger.warn("All attempts at reconnection failed. Aborting failover", e);
-                                closedException = ExceptionHelper.toJMSException(
-                                        "All attempts at reconnection failed. Aborting failover", e);
-                                status = FailoverStatus.RECONNECTION_FAILED;
-                            }
-                        }
-    
-                        if (status == FailoverStatus.SUCCESSFUL)
-                        {
-                            try
-                            {
-                                _logger.warn("Reconnection succesfull, Executing post failover routine");
-                                postFailover();
-                                retry = false;
-                                for (org.apache.qpid.amqp_0_10.jms.ConnectionListener l : _listeners)
-                                {
-                                    l.postFailover(this);
-                                }
-                            }
-                            catch (JMSException e)
-                            {
-                                if (_connCreatedTimestamp < _connExceptionTimestamp)
-                                {
-                                    retry = true;
-                                    _logger.warn(
-                                            "Broker connection failed before post-failover routine was completed. Retrying failover.",
-                                            e);
-                                    continue;
-                                }
-                                else
-                                {
-                                    retry = false;
-                                    _logger.warn("Post failover failed. Closing the connection", e);
-                                    closedException = ExceptionHelper.toJMSException(
-                                            "Post failover failed. Closing the connection", e);
-                                    status = FailoverStatus.POST_FAILOVER_FAILED;
-                                }
-                            }
-                        }
-    
-                        switch (status)
-                        {
-                        case PRE_FAILOVER_FAILED:
-                        case RECONNECTION_FAILED:
-                        case POST_FAILOVER_FAILED:
-    
-                            try
-                            {
-                                markAsClosing();
-                                _failoverInProgress.setValueAndNotify(false);
-                                closeImpl(status == FailoverStatus.POST_FAILOVER_FAILED);
-                            }
-                            catch (JMSException e)
-                            {
-                                _logger.warn("Connection close failed", e);
-                            }
-                            break;
-    
-                        default:
-                            _failoverInProgress.setValueAndNotify(false);
-                            _logger.warn("Failover succesfull. Connection Ready to be used");
-                            break;
-                        }
-                        _lock.notifyAll();
                     }
+
+                    if (status == FailoverStatus.SUCCESSFUL)
+                    {
+                        try
+                        {
+                            _logger.warn("Reconnection succesfull, Executing post failover routine");
+                            postFailover();
+                            // l.postFailover(this);
+                        }
+                        catch (ConnectionFailedException e)
+                        {
+                            _logger.warn("Broker connection failed before post-failover routine was completed.", e);
+                            status = FailoverStatus.CONN_FAILED_DURING_POST;
+                        }
+                        catch (JMSException e)
+                        {
+                            _logger.warn("Post failover failed. Closing the connection", e);
+                            closedException = ExceptionHelper.toJMSException("Post failover failed.", e);
+                            status = FailoverStatus.POST_FAILOVER_FAILED;
+                        }
+                    }
+
+                    switch (status)
+                    {
+                    case CONN_FAILED_DURING_POST:
+                        return;
+                    case PRE_FAILOVER_FAILED:
+                    case RECONNECTION_FAILED:
+                    case POST_FAILOVER_FAILED:
+                        markAsClosing();
+                        _failoverInProgress.setValueAndNotify(false);
+                        closeImplLogException(status == FailoverStatus.POST_FAILOVER_FAILED);
+                        break;
+
+                    default:
+                        _failoverInProgress.setValueAndNotify(false);
+                        _logger.warn("Failover succesfull. Connection Ready to be used");
+                        break;
+                    }
+                    _lock.notifyAll();
                 }
-            }
-            catch (Exception e)
-            {
-                _logger.warn(e, "Exception during failover. Closing connection");
-                _logger.warn(e, "Closing connection outside of lock");
-                try
+                catch (Exception e)
                 {
-                    _failoverInProgress.setValueAndNotify(false);
-                    closeImpl(status == FailoverStatus.POST_FAILOVER_FAILED);
-                }
-                catch (JMSException e1)
-                {
-                    _logger.warn("Connection close failed", e);
+                    _logger.error("Uncaught exception during failover", e);
                 }
             }
-            finally
+            else
             {
-                _failoverInProgress.setValueAndNotify(false);
+                closeImplLogException(false);
+                closedException = ExceptionHelper.toJMSException("Connection closed by broker", _exception);
             }
-        /*}
-        else
-        {
-            try
-            {
-                closeImpl(false);
-            }
-            catch (JMSException e)
-            {
-                _logger.warn("Connection close failed", e);
-            }
-            closedException = ExceptionHelper.toJMSException("Connection closed due to exception", _exception);
-        }*/
+        }
 
         // You don't need to access the state inside the lock as once closed
         // the state will never change.
@@ -588,10 +539,21 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         {
             l.closed(this);
         }
-
     }
 
     // -----------------------------------------
+
+    void closeImplLogException(boolean sendClose)
+    {
+        try
+        {
+            closeImpl(sendClose);
+        }
+        catch (JMSException e)
+        {
+            _logger.warn("Error closing connection", e);
+        }
+    }
 
     void closeImpl(boolean sendClose) throws JMSException
     {
@@ -638,8 +600,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         }
     }
 
-    // ----------------These methods are only called from closed()
-    // method----------------------
+    // ----These methods are only called from closed() method-------
     void preFailover() throws JMSException
     {
         _dispatchManager.markStopped();
@@ -661,6 +622,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     void markAsClosing()
     {
+        _state = State.CLOSING;
         for (SessionImpl ssn : _sessions)
         {
             ssn.markAsClosing();
@@ -978,7 +940,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     {
         synchronized (_lock)
         {
-            if (_state == State.CLOSED)
+            if (_state == State.CLOSED || _state == State.CLOSING)
             {
                 throw new IllegalStateException("Connection is " + _state);
             }

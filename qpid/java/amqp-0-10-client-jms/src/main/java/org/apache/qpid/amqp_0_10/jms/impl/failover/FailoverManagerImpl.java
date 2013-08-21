@@ -23,6 +23,7 @@ package org.apache.qpid.amqp_0_10.jms.impl.failover;
 import javax.jms.JMSException;
 
 import org.apache.qpid.amqp_0_10.jms.Connection;
+import org.apache.qpid.amqp_0_10.jms.ConnectionFailedException;
 import org.apache.qpid.amqp_0_10.jms.FailoverManager;
 import org.apache.qpid.amqp_0_10.jms.FailoverUnsuccessfulException;
 import org.apache.qpid.amqp_0_10.jms.impl.ConnectionImpl;
@@ -52,7 +53,7 @@ public class FailoverManagerImpl implements FailoverManager
 
     private long _lastRetryInterval = 0;
 
-    private FailoverUnsuccessfulException _exception;
+    private Exception _exception;
 
     @Override
     public void init(Connection con)
@@ -65,7 +66,7 @@ public class FailoverManagerImpl implements FailoverManager
     }
 
     @Override
-    public void connect() throws FailoverUnsuccessfulException
+    public void connect() throws FailoverUnsuccessfulException, JMSException
     {
         if (initialConnAttempted)
         {
@@ -76,32 +77,28 @@ public class FailoverManagerImpl implements FailoverManager
             initialConnAttempted = true;
             try
             {
-                connectToBroker(_currentBroker);
+                _conn.connect(_currentBroker.getSettings());
                 _logger.warn("Initial Connection Attempt Successfull");
                 return;
             }
-            catch (FailoverUnsuccessfulException e)
+            catch (ConnectionFailedException e)
             {
-                Throwable t = e.getCause().getCause();
-                if (t.getClass() == TransportException.class)
-                {
-                    _exception = e;
-                    reconnect();
-                }
-                else
-                {
-                    throw e;
-                }
+                _exception = e;
+                reconnect();
+            }
+            catch (JMSException e)
+            {
+                throw e;
             }
         }
     }
 
-    void reconnect() throws FailoverUnsuccessfulException
+    void reconnect() throws FailoverUnsuccessfulException, JMSException
     {
         if (_failoverMethod == FailoverMethod.NO_FAILOVER)
         {
             _logger.warn("Failover is disabled.");
-            throw new FailoverUnsuccessfulException("Failover is disabled", _exception);
+            throw new FailoverUnsuccessfulException("Failover is disabled. Last exception linked", _exception);
         }
         else
         {
@@ -117,20 +114,17 @@ public class FailoverManagerImpl implements FailoverManager
                     try
                     {
                         _currentBrokerRetries++;
-                        connectToBroker(_currentBroker);
+                        _conn.connect(_currentBroker.getSettings());
                         return;
                     }
-                    catch (FailoverUnsuccessfulException e)
+                    catch (ConnectionFailedException e)
                     {
-                        Throwable t = e.getCause().getCause();
-                        if (t.getClass() == TransportException.class)
-                        {
-                            _exception = e;
-                        }
-                        else
-                        {
-                            throw e;
-                        }       
+                        _exception = e;
+                        reconnect();
+                    }
+                    catch (JMSException e)
+                    {
+                        throw e;
                     }
                 }
                 else
@@ -151,8 +145,12 @@ public class FailoverManagerImpl implements FailoverManager
         {
             // Log a warning.
             _logger.warn("'connectdelay' broker property is deprecated and hence ignored."
-                    + "A min_retry_interval of " + _minRetryInterval/1000
-                    + " secs and max_retry_interval of " + _maxRetryInterval/1000
+                    + "A min_retry_interval of "
+                    + _minRetryInterval
+                    / 1000
+                    + " secs and max_retry_interval of "
+                    + _maxRetryInterval
+                    / 1000
                     + " secs used instead."
                     + "Please configure 'min_retry_interval' and 'max_retry_interval' connection properties to change the default");
         }
@@ -172,18 +170,6 @@ public class FailoverManagerImpl implements FailoverManager
     Broker getNextBrokerToConnect()
     {
         return _brokers.getNextBroker();
-    }
-
-    void connectToBroker(Broker broker) throws FailoverUnsuccessfulException
-    {
-        try
-        {
-            _conn.connect(broker.getSettings());
-        }
-        catch (JMSException e)
-        {
-            throw new FailoverUnsuccessfulException("Connection unsuccessful", e);
-        }
     }
 
     BrokerList getBrokerList()

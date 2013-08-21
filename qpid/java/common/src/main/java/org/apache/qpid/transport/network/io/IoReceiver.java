@@ -229,7 +229,7 @@ final class IoReceiver implements Runnable, Closeable
         {
             if (read == -1 && !exceptionNotified)
             {
-                receiver.exception(new TransportException("connection aborted"));
+                receiver.exception(new TransportException("connection-failed"));
             }
             try
             {

@@ -22,26 +22,13 @@ package org.apache.qpid.amqp_0_10.jms;
 
 import javax.jms.JMSException;
 
-/**
- * If an application wants to override default failover behavior, It can
- * implement this interface and pass the implementation class name either as a
- * connection parameter or specify it using
- * -Dqpid.failover_manager=<class-name>.
- * 
- */
-public interface FailoverManager
+@SuppressWarnings("serial")
+public class ConnectionFailedException extends JMSException
 {
-    public void init(Connection con);
-
-    /**
-     * This method should either call @See Connection.connect(ConnectionSettings
-     * settings) method, with the next broker to connect to, or throw
-     * FailoverUnsuccessfulException if all attempts at connection or re-connection failed.
-     * JMSException will be thrown if authentication is unsuccessful or other
-     * errors not related to failover is encountered. 
-     * 
-     * @throws FailoverUnsuccessfulException
-     * @throws JMSException
-     */
-    public void connect() throws FailoverUnsuccessfulException, JMSException;
+    public ConnectionFailedException(String message, Exception cause)
+    {
+        super(message);
+        initCause(cause);
+        setLinkedException(cause);
+    }
 }
