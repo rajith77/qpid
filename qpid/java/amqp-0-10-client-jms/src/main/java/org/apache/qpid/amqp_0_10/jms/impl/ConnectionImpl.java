@@ -185,13 +185,13 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 {
                     throw ExceptionHelper.toJMSException("Invalid Protocol Version", pe);
                 }
-                catch (TransportFailureException pe)
-                {
-                    throw new ConnectionFailedException("Unable to connect to broker", pe);
-                }
                 catch (ConnectionException ce)
                 {
                     throw ExceptionHelper.toJMSException("Error connecting to broker", ce);
+                }
+                catch (TransportException pe)
+                {
+                    throw new ConnectionFailedException("Unable to connect to broker", pe);
                 }
             }
         }
@@ -518,6 +518,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 }
                 catch (Exception e)
                 {
+                    e.printStackTrace();
                     _logger.error("Uncaught exception during failover", e);
                 }
             }

@@ -63,7 +63,7 @@ public class ExceptionHelper
         }
     }
 
-    public static JMSException toJMSException(String msg, AMQException e)
+    private static JMSException toJMSException(String msg, AMQException e)
     {
         JMSException ex = new JMSException(msg, e.getErrorCode().getName().asString());
         ex.initCause(e);
@@ -71,7 +71,7 @@ public class ExceptionHelper
         return ex;
     }
 
-    public static JMSException toJMSException(String msg, ConnectionException ce)
+    private static JMSException toJMSException(String msg, ConnectionException ce)
     {
         String code = ConnectionCloseCode.NORMAL.name();
         if (ce.getClose() != null && ce.getClose().getReplyCode() != null)
@@ -84,7 +84,7 @@ public class ExceptionHelper
         return ex;
     }
 
-    public static JMSException toJMSException(String msg, SessionException se)
+    private static JMSException toJMSException(String msg, SessionException se)
     {
         String code = "UNSPECIFIED";
         ExecutionErrorCode executionError = ExecutionErrorCode.INTERNAL_ERROR;
@@ -93,7 +93,8 @@ public class ExceptionHelper
             code = se.getException().getErrorCode().name();
             executionError = se.getException().getErrorCode();
         }
-        if (executionError == ExecutionErrorCode.UNAUTHORIZED_ACCESS || executionError == ExecutionErrorCode.NOT_ALLOWED)
+        if (executionError == ExecutionErrorCode.UNAUTHORIZED_ACCESS
+                || executionError == ExecutionErrorCode.NOT_ALLOWED)
         {
             JMSException ex = new javax.jms.JMSSecurityException(msg, code);
             ex.initCause(se);

@@ -100,7 +100,7 @@ public class Connection extends ConnectionInvoker
 
     private static final SessionFactory DEFAULT_SESSION_FACTORY = new DefaultSessionFactory();
 
-    private SessionFactory _sessionFactory = DEFAULT_SESSION_FACTORY;
+    protected SessionFactory _sessionFactory = DEFAULT_SESSION_FACTORY;
 
     private ConnectionDelegate delegate;
     protected Sender<ProtocolEvent> sender;
@@ -110,7 +110,7 @@ public class Connection extends ConnectionInvoker
 
     protected State state = NEW;
     final protected Object lock = new Object();
-    private long timeout = 60000;
+    protected long timeout = 60000;
     protected List<ConnectionListener> listeners = new ArrayList<ConnectionListener>();
     protected ConnectionException error = null;
 
@@ -457,7 +457,7 @@ public class Connection extends ConnectionInvoker
         channelMax = max;
     }
 
-    private int map(Session ssn)
+    protected int map(Session ssn)
     {
         synchronized (lock)
         {

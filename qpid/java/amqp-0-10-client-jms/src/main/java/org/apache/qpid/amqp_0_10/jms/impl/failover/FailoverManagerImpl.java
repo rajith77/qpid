@@ -120,7 +120,6 @@ public class FailoverManagerImpl implements FailoverManager
                     catch (ConnectionFailedException e)
                     {
                         _exception = e;
-                        reconnect();
                     }
                     catch (JMSException e)
                     {

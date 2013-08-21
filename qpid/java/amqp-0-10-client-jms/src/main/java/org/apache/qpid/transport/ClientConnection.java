@@ -28,6 +28,8 @@ import java.util.List;
 
 import javax.security.sasl.SaslException;
 
+import org.apache.qpid.transport.util.Waiter;
+
 public class ClientConnection extends Connection
 {
     private ConnectionException _exception; 
@@ -35,6 +37,37 @@ public class ClientConnection extends Connection
     public ClientConnection()
     {
         super();
+    }
+
+    @Override
+    public Session createSession(Binary name, long expiry, boolean isNoReplay)
+    {
+        synchronized (lock)
+        {
+            Waiter w = new Waiter(lock, timeout);
+            while (w.hasTime() && state != OPEN && _exception == null)
+            {
+                w.await();
+            }
+
+            if (state != OPEN)
+            {
+                if (connectionLost.get())
+                {
+                    throw _exception;
+                }
+                else
+                {
+                    throw new ConnectionException("Timed out waiting for connection to be ready. Current state is :" + state);
+                }
+            }
+
+            Session ssn = _sessionFactory.newSession(this, name, expiry, isNoReplay);
+            registerSession(ssn);
+            map(ssn);
+            ssn.attach();
+            return ssn;
+        }
     }
 
     @Override
