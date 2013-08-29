@@ -48,6 +48,7 @@ import org.apache.qpid.transport.MessageProperties;
 import org.apache.qpid.transport.MessageTransfer;
 import org.apache.qpid.transport.ReplyTo;
 import org.apache.qpid.transport.SessionClosedException;
+import org.apache.qpid.transport.SessionTimeoutException;
 import org.apache.qpid.transport.util.Logger;
 import org.apache.qpid.util.ConditionManager;
 import org.apache.qpid.util.ExceptionHelper;
@@ -61,6 +62,12 @@ public class MessageProducerImpl implements MessageProducer
 
     private static final int MAX_CACHED_ENTRIES = Integer.getInteger(ClientProperties.QPID_MAX_CACHED_DEST,
             ClientProperties.DEFAULT_MAX_CACHED_DEST);
+
+    private static final int DEFAULT_CAPACITY = Integer.getInteger(ClientProperties.QPID_SENDER_CAPACITY,
+            ClientProperties.DEFAULT_SENDER_CAPACITY);
+
+    private static final long DEFAULT_PRODUCER_SYNC_TIMEOUT = 1000 * Integer.getInteger(ClientProperties.PRODUCER_SYNC_TIMEOUT,
+            ClientProperties.DEFAULT_PRODUCER_SYNC_TIMEOUT);
 
     @SuppressWarnings("serial")
     private static final Map<DestinationImpl, ReplyTo> DEST_TO_REPLY_CACHE = Collections
@@ -87,6 +94,8 @@ public class MessageProducerImpl implements MessageProducer
     private final byte[] _userIDBytes;
 
     private final int _capacity;
+
+    private final long _producerSyncTimeout;
 
     private final boolean _isReplayRequired;
 
@@ -126,9 +135,9 @@ public class MessageProducerImpl implements MessageProducer
 
         _syncPublish = getSyncPublish();
 
-        int defaultCapacity = Integer.getInteger(ClientProperties.QPID_SENDER_CAPACITY,
-                ClientProperties.DEFAULT_SENDER_CAPACITY);
-        _capacity = AddressResolution.evaluateCapacity(defaultCapacity, _dest, CheckMode.SENDER);
+        _capacity = AddressResolution.evaluateCapacity(DEFAULT_CAPACITY, _dest, CheckMode.SENDER);
+
+        _producerSyncTimeout = AddressResolution.getProducerSyncTimeout(DEFAULT_PRODUCER_SYNC_TIMEOUT, _dest);
 
         _isReplayRequired = AddressResolution.isReplayRequired(_dest);
 
@@ -307,7 +316,14 @@ public class MessageProducerImpl implements MessageProducer
 
             if (sync || _count >= _capacity)
             {
-                _session.getAMQPSession().sync();
+                try
+                {
+                    _session.getAMQPSession().sync(_producerSyncTimeout);
+                }
+                catch (SessionTimeoutException e)
+                {
+                    //Throw a JMSException that an application can catch and retry.
+                }
                 _count = 0;
             }
             else if (_isReplayRequired)

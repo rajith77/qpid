@@ -88,6 +88,8 @@ public class AddressHelper
 
     public static final String RELIABILITY = "reliability";
 
+    public static final String PRODUCER_SYNC_TIMEOUT = "producer_sync_timeout";
+
     private Address _address;
 
     private Accessor _addressPropAccess;
@@ -273,6 +275,8 @@ public class AddressHelper
                 consCapacity = cap;
             }
 
+            int producerSyncTimeout = _linkPropAccess.getInt(PRODUCER_SYNC_TIMEOUT) == null ? 0 : _linkPropAccess.getInt(PRODUCER_SYNC_TIMEOUT);
+
             Subscription subscription;
             if (_linkPropAccess.getMap(X_SUBSCRIBE) != null)
             {
@@ -305,6 +309,7 @@ public class AddressHelper
                             Reliability.getReliability(_linkPropAccess.getString(RELIABILITY)),
                             prodCapacity,
                             consCapacity,
+                            producerSyncTimeout,
                             subscription,
                             getBindings(_linkPropMap),
                             subQueue);

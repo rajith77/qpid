@@ -33,6 +33,8 @@ public class Link
 
     private final int _producerCapacity;
 
+    private final int _producerSyncTimeout;
+
     private final Reliability _reliability;
 
     private final Subscription _subscription;
@@ -48,19 +50,21 @@ public class Link
         _reliability = Reliability.AT_LEAST_ONCE;
         _producerCapacity = 0;
         _consumerCapacity = 0;
+        _producerSyncTimeout = 0;
         _subscription = new Subscription();
         _bindings = Collections.<Binding>emptyList();
         _subscriptionQueue = new SubscriptionQueue();
     }
 
     public Link(String name, boolean durable, Reliability reliability, int producerCapacity, int consumerCapacity,
-            Subscription subscription, List<Binding> binding, SubscriptionQueue subscriptionQueue)
+            int producerSyncTimeout, Subscription subscription, List<Binding> binding, SubscriptionQueue subscriptionQueue)
     {
         _name = name;
         _durable = durable;
         _reliability = reliability;
         _producerCapacity = producerCapacity;
         _consumerCapacity = consumerCapacity;
+        _producerSyncTimeout = producerSyncTimeout;
         _subscription = subscription;
         _bindings = binding == null ? Collections.<Binding>emptyList() : Collections.unmodifiableList(binding);
         _subscriptionQueue = subscriptionQueue;
@@ -84,6 +88,11 @@ public class Link
     public int getProducerCapacity()
     {
         return _producerCapacity;
+    }
+
+    public int getProducerSyncTimeout()
+    {
+        return _producerSyncTimeout;
     }
 
     public String getName()

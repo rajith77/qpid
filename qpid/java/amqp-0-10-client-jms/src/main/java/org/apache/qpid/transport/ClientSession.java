@@ -1,7 +1,9 @@
 package org.apache.qpid.transport;
 
+import static org.apache.qpid.transport.Option.SYNC;
 import static org.apache.qpid.transport.Session.State.CLOSED;
 import static org.apache.qpid.transport.Session.State.OPEN;
+import static org.apache.qpid.util.Serial.lt;
 
 import org.apache.qpid.transport.network.Frame;
 import org.apache.qpid.transport.util.Logger;
@@ -141,6 +143,53 @@ public class ClientSession extends Session
         else
         {
             send(m);
+        }
+    }
+
+    @Override
+    public void sync(long timeout)
+    {
+        _log.debug("%s sync()", this);
+        synchronized (commandsLock)
+        {
+            int point = commandsOut - 1;
+
+            if (needSync && lt(maxComplete, point))
+            {
+                executionSync(SYNC);
+            }
+
+            Waiter w = new Waiter(commandsLock, timeout);
+            while (w.hasTime() && state != CLOSED && lt(maxComplete, point))
+            {
+                if(_log.isDebugEnabled())
+                {
+                    _log.debug("%s   waiting for[%d]: %d, %s", this, point, maxComplete, commands);
+                }
+                w.await();
+            }
+
+            if (lt(maxComplete, point))
+            {
+                if (state != CLOSED)
+                {
+                    throw new SessionTimeoutException(
+                            String.format("timed out waiting for sync: complete = %s, point = %s",
+                                    maxComplete, point));
+                }
+                else
+                {
+                    ExecutionException ee = getException();
+                    if (ee == null)
+                    {
+                        throw new SessionClosedException();
+                    }
+                    else
+                    {
+                        throw new SessionException(ee);
+                    }
+                }
+            }
         }
     }
 

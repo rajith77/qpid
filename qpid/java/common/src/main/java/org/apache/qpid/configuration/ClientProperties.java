@@ -229,6 +229,10 @@ public class ClientProperties
     public static final String QPID_DISPATCHER_COUNT = "qpid.con.dispatcher_count";
     public static final int DEFAULT_DISPATCHER_COUNT = 1;
 
+    // Given in seconds.
+    public static final String PRODUCER_SYNC_TIMEOUT = "qpid.producer_sync_timeout";
+    public static final int DEFAULT_PRODUCER_SYNC_TIMEOUT = 1;
+
     private ClientProperties()
     {
         //No instances

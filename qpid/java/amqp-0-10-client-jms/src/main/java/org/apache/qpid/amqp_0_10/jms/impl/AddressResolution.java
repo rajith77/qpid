@@ -771,6 +771,19 @@ public class AddressResolution
         }
     }
 
+    public static long getProducerSyncTimeout(long defaultTimeout, DestinationImpl dest)
+    {
+        Link link = dest.getAddress().getLink();
+        if (link.getProducerSyncTimeout() > 0)
+        {
+            return link.getProducerSyncTimeout() * 1000;
+        }
+        else
+        {
+            return defaultTimeout;
+        }
+    }
+
     public static boolean isReplayRequired(DestinationImpl dest)
     {
         return dest.getAddress().getLink().getReliability() != Reliability.UNRELIABLE;

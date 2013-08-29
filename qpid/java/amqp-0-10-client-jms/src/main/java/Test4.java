@@ -76,7 +76,7 @@ public class Test4
                         }
 
                     };
-                    MessageConsumer cons1 = ssn.createConsumer(ssn.createQueue("MY_QUEUE;{create: always}"));
+                    MessageConsumer cons1 = ssn.createConsumer(ssn.createQueue("MY_QUEUE;{create: always, node: {x-declare: {arguments: {'qpid.max_count': 10}}}}"));
                     cons1.setMessageListener(l);
 
                     final Object o = new Object();
@@ -104,7 +104,7 @@ public class Test4
         };
 
         Thread t = new Thread(r);
-        t.setName("Thread-" + id);
+        t.setName("Consumer-Thread-" + id);
         t.start();
     }
 
@@ -130,6 +130,7 @@ public class Test4
             }
             catch (JMSException e)
             {
+                e.printStackTrace();
                 if (e.getMessage().contains("closed"))
                 {
                     throw e;
@@ -166,14 +167,7 @@ public class Test4
 
             }
         });
+        t.setName("Producer-Thread");
         t.start();
-        
-        /*long start = 5000;
-        for (int i=0; i < 10; i++)
-        {
-            double e = 0.5*(Math.pow(2,i+1));
-            long value = (long)e*start;
-            System.out.println("e : " + e + " value : " + value/1000);
-        }*/
     }
 }
