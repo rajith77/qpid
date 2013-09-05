@@ -227,19 +227,22 @@ final class IoReceiver implements Runnable, Closeable
         }
         finally
         {
-            if (read == -1 && !exceptionNotified)
+            if (!closed.get())
             {
-                receiver.exception(new TransportException("connection-failed"));
+                if (read == -1 && !exceptionNotified)
+                {
+                    receiver.exception(new TransportException("connection-failed"));
+                }
+                try
+                {
+                    socket.close();
+                }
+                catch(Exception e)
+                {
+                    log.warn(e, "Error closing socket");
+                }
+                receiver.closed();
             }
-            try
-            {
-                socket.close();
-            }
-            catch(Exception e)
-            {
-                log.warn(e, "Error closing socket");
-            }
-            receiver.closed();
         }
     }
 
