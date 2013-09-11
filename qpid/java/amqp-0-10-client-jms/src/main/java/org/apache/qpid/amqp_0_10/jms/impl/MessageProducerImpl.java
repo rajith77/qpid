@@ -37,6 +37,7 @@ import javax.jms.Message;
 import javax.jms.MessageProducer;
 
 import org.apache.qpid.amqp_0_10.jms.impl.AddressResolution.CheckMode;
+import org.apache.qpid.amqp_0_10.jms.impl.message.MessageConverter;
 import org.apache.qpid.configuration.ClientProperties;
 import org.apache.qpid.transport.DeliveryProperties;
 import org.apache.qpid.transport.Header;
@@ -66,8 +67,8 @@ public class MessageProducerImpl implements MessageProducer
     private static final int DEFAULT_CAPACITY = Integer.getInteger(ClientProperties.QPID_SENDER_CAPACITY,
             ClientProperties.DEFAULT_SENDER_CAPACITY);
 
-    private static final long DEFAULT_PRODUCER_SYNC_TIMEOUT = 1000 * Integer.getInteger(ClientProperties.PRODUCER_SYNC_TIMEOUT,
-            ClientProperties.DEFAULT_PRODUCER_SYNC_TIMEOUT);
+    private static final long DEFAULT_PRODUCER_SYNC_TIMEOUT = 1000 * Integer.getInteger(
+            ClientProperties.PRODUCER_SYNC_TIMEOUT, ClientProperties.DEFAULT_PRODUCER_SYNC_TIMEOUT);
 
     @SuppressWarnings("serial")
     private static final Map<DestinationImpl, ReplyTo> DEST_TO_REPLY_CACHE = Collections
@@ -322,7 +323,8 @@ public class MessageProducerImpl implements MessageProducer
                 }
                 catch (SessionTimeoutException e)
                 {
-                    //Throw a JMSException that an application can catch and retry.
+                    // Throw a JMSException that an application can catch and
+                    // retry.
                 }
                 _count = 0;
             }
@@ -467,14 +469,19 @@ public class MessageProducerImpl implements MessageProducer
                 || (_publishMode == PublishMode.SYNC_PUBLISH_PERSISTENT && _deliveryMode == MessageDeliveryMode.PERSISTENT);
     }
 
-    MessageImpl convertToNativeMessage(Message msg)
+    MessageImpl convertToNativeMessage(Message msg) throws JMSException
     {
-        return null;
+        return MessageConverter.convert(msg);
     }
 
-    void updateFiledsInForeignMsg(Message msg, MessageImpl message)
+    void updateFiledsInForeignMsg(Message msg, MessageImpl message) throws JMSException
     {
-        // TODO Auto-generated method stub
+        msg.setJMSDestination(message.getJMSDestination());
+        msg.setJMSDeliveryMode(message.getJMSDeliveryMode());
+        msg.setJMSExpiration(message.getJMSExpiration());
+        msg.setJMSPriority(message.getJMSPriority());
+        msg.setJMSTimestamp(message.getJMSTimestamp());
+        msg.setJMSExpiration(message.getJMSExpiration());
     }
 
     void waitForSenderToComplete()
