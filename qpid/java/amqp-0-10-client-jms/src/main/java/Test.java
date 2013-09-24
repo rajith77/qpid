@@ -5,6 +5,7 @@ import javax.jms.MessageConsumer;
 import javax.jms.MessageProducer;
 import javax.jms.Queue;
 import javax.jms.Session;
+import javax.jms.TemporaryQueue;
 import javax.jms.TextMessage;
 
 import org.apache.qpid.amqp_0_10.jms.impl.ConnectionImpl;
@@ -24,7 +25,9 @@ public class Test
         ConnectionImpl con = new ConnectionImpl(url);
         
         Session ssn = con.createSession(false, Session.AUTO_ACKNOWLEDGE);
-        Destination queue = ssn.createTemporaryQueue(); //ssn.createQueue("MY_QUEUE;{create : always}");
+        TemporaryQueue queue = ssn.createTemporaryQueue(); //ssn.createQueue("MY_QUEUE;{create : always}");
+        
+        queue.delete();
         
         MessageProducer prod = ssn.createProducer(queue);
         for (int i=0; i < 5; i++)
@@ -84,7 +87,7 @@ public class Test
      */
     public static void main(String[] args) throws Exception
     {
-        Test.testRollbackOnClose();
+        Test.basicSendReceive();
     }
 
 }

@@ -68,7 +68,7 @@ public class TemporaryQueueImpl extends QueueImpl implements TemporaryQueue
         {
             _session.removeTempQueue(this);
         }
-        _session.getAMQPSession().queueDelete(_name);
+        AddressResolution.verifyAndDeleteQueue(_session, _name);
     }
 
     @Override

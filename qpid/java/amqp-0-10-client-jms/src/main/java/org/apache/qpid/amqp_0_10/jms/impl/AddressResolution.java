@@ -818,4 +818,20 @@ public class AddressResolution
     {
         return dest.getAddress().isBrowseOnly() ? MessageAcquireMode.NOT_ACQUIRED : MessageAcquireMode.PRE_ACQUIRED;
     }
+
+    static void verifyAndDeleteQueue(SessionImpl ssn, String name) throws JMSException
+    {
+        try
+        {
+            QueueQueryResult result = ssn.getAMQPSession().queueQuery(name, Option.NONE).get();
+            if (result.hasQueue())
+            {
+                handleQueueDelete(ssn, name);
+            }
+        }
+        catch (SessionException se)
+        {
+            throw ExceptionHelper.toJMSException("Error deleting Queue", se);
+        }
+    }
 }
