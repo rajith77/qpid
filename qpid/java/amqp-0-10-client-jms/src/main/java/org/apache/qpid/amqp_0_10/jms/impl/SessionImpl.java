@@ -218,6 +218,15 @@ public class SessionImpl implements Session, QueueSession, TopicSession
         {
             _closed.set(true);
 
+            try
+            {
+                getAMQPSession().sync();
+            }
+            catch (Exception e)
+            {
+                throw ExceptionHelper.toJMSException("Error waiting for sync to complete, while closing session", e);
+            }
+
             if (unregister)
             {
                 _conn.removeSession(this);
