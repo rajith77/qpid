@@ -130,6 +130,15 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
         _msgReadOnly = true;
         _transferId = transferId;
         _consumerId = consumerId;
+        if (isStrictJMS)
+        {
+            String subject = (String)_messageProps.getApplicationHeaders().get(QpidMessageProperties.QPID_SUBJECT);
+            if (subject != null)
+            {
+                _messageProps.getApplicationHeaders().remove(QpidMessageProperties.QPID_SUBJECT);
+                _messageProps.getApplicationHeaders().put("JMS_" + QpidMessageProperties.QPID_SUBJECT,subject);
+            }
+        }
     }
 
     @Override
