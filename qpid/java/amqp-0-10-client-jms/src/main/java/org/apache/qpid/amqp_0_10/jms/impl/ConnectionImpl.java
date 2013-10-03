@@ -126,10 +126,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     private String _clientId;
 
-    private long _connExceptionTimestamp = 0;
-
-    private long _connCreatedTimestamp = 0;
-
     private ConnectionException _exception;
 
     private volatile ExceptionListener _exceptionListener;
@@ -399,7 +395,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
     @Override
     public void exception(org.apache.qpid.transport.Connection connection, ConnectionException exception)
     {
-        _connExceptionTimestamp = System.currentTimeMillis();
         _logger.error("Connection exception received!", exception);
         if (_exception != null)
         {
@@ -424,12 +419,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 _logger.warn("Connection already marked as closed. No failover is attempted.");
                 return;
             }
-
-            /*if (_connExceptionTimestamp < _connCreatedTimestamp)
-            {
-                _logger.warn("Connection has already failedover successfully. Ignoring the spurious closed notification, that was invoked while failover was in progress");
-                return;
-            }*/
 
             if (_exception != null && _exception instanceof TransportFailureException)
             {
@@ -459,7 +448,6 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                         try
                         {
                             _failoverManager.connect();
-                            _connCreatedTimestamp = System.currentTimeMillis();
                             _state = prevState; // either START or STOPPED
                         }
                         catch (FailoverUnsuccessfulException e)
@@ -854,8 +842,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         if (_state != State.CLOSED)
         {
             SessionImpl ssn = _sessionMap.get(session);
-            ssn.setException(exception);
-            // TODO notify session exception via ExceptionListener
+            ssn.setException(exception);            
         }
     }
 
@@ -876,6 +863,10 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 catch (JMSException e)
                 {
                     _logger.warn(e, "Error closing session");
+                }
+                if (_config.isNotifySessionExceptions())
+                {
+                    _exceptionListener.onException(ExceptionHelper.toJMSException("Session exception", ssn.getException()));
                 }
             }
         }

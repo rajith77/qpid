@@ -233,6 +233,8 @@ public class ClientProperties
     public static final String PRODUCER_SYNC_TIMEOUT = "qpid.producer_sync_timeout";
     public static final int DEFAULT_PRODUCER_SYNC_TIMEOUT = 1;
 
+    public static final String QPID_NOTIFY_SESSION_EXCEPTIONS = "qpid.notify_ssn_exceptions";
+
     private ClientProperties()
     {
         //No instances

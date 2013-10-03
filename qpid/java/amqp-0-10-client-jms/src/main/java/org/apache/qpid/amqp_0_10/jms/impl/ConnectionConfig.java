@@ -77,4 +77,9 @@ public class ConnectionConfig
     {
         return _url;
     }
+
+    public boolean isNotifySessionExceptions()
+    {
+        return Boolean.getBoolean(ClientProperties.QPID_NOTIFY_SESSION_EXCEPTIONS);
+    }
 }
