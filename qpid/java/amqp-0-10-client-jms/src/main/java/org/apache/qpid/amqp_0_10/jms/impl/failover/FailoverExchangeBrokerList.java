@@ -10,6 +10,8 @@ import javax.jms.MessageConsumer;
 import javax.jms.MessageListener;
 import javax.jms.Session;
 
+import org.apache.qpid.amqp_0_10.jms.ConnectionEvent;
+import org.apache.qpid.amqp_0_10.jms.ConnectionEvent.ConnectionEventType;
 import org.apache.qpid.amqp_0_10.jms.ConnectionListener;
 import org.apache.qpid.amqp_0_10.jms.impl.ConnectionImpl;
 import org.apache.qpid.transport.ConnectionSettings;
@@ -79,17 +81,20 @@ public class FailoverExchangeBrokerList implements BrokerList, ConnectionListene
     }
 
     @Override
-    public void opened(org.apache.qpid.amqp_0_10.jms.Connection con)
+    public void connectionEvent(ConnectionEvent event)
     {
-        try
+        if (ConnectionEventType.OPENED == event.getEventType())
         {
-            Session ssn = _conn.createSession(false, Session.AUTO_ACKNOWLEDGE);
-            MessageConsumer cons = ssn.createConsumer(ssn.createTopic("amq.failover"));
-            cons.setMessageListener(this);
-        }
-        catch (JMSException e)
-        {
-            throw new Error("Error subscribing to the failover_exchange", e);
+            try
+            {
+                Session ssn = _conn.createSession(false, Session.AUTO_ACKNOWLEDGE);
+                MessageConsumer cons = ssn.createConsumer(ssn.createTopic("amq.failover"));
+                cons.setMessageListener(this);
+            }
+            catch (JMSException e)
+            {
+                throw new Error("Error subscribing to the failover_exchange", e);
+            }
         }
     }
 
@@ -148,45 +153,5 @@ public class FailoverExchangeBrokerList implements BrokerList, ConnectionListene
         {
             _logger.error("Error parsing the message sent by failover exchange", e);
         }
-    }
-
-    @Override
-    public void started(org.apache.qpid.amqp_0_10.jms.Connection con)
-    {
-    }
-
-    @Override
-    public void stopped(org.apache.qpid.amqp_0_10.jms.Connection con)
-    {
-    }
-
-    @Override
-    public void closed(org.apache.qpid.amqp_0_10.jms.Connection con)
-    {
-    }
-
-    @Override
-    public void exception(org.apache.qpid.amqp_0_10.jms.Connection con, Exception exp)
-    {
-    }
-
-    @Override
-    public void protocolConnectionCreated(org.apache.qpid.amqp_0_10.jms.Connection con)
-    {
-    }
-
-    @Override
-    public void protocolConnectionLost(org.apache.qpid.amqp_0_10.jms.Connection con)
-    {
-    }
-
-    @Override
-    public void preFailover(org.apache.qpid.amqp_0_10.jms.Connection con)
-    {
-    }
-
-    @Override
-    public void postFailover(org.apache.qpid.amqp_0_10.jms.Connection con)
-    {
     }
 }

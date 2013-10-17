@@ -39,7 +39,12 @@ public class DefaultThreadFactory implements ThreadFactory
     {
         Thread t = createThread(r);
         t.setPriority(priority);
+        t.setUncaughtExceptionHandler(_loggingUncaughtExceptionHandler);
         return t;
     }
 
+    public Thread newThread(Runnable r)
+    {
+        return createThread(r);
+    }
 }

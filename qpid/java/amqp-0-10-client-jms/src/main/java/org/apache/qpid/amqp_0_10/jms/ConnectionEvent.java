@@ -20,7 +20,46 @@
  */
 package org.apache.qpid.amqp_0_10.jms;
 
-public interface ConnectionListener
+public class ConnectionEvent
 {
-    public void connectionEvent(ConnectionEvent event);
+    public enum ConnectionEventType
+    {
+        OPENED,
+        STARTED,
+        STOPPED,
+        CLOSED,
+        EXCEPTION,
+        PROTOCOL_CONNECTION_CREATED,
+        PROTOCOL_CONNECTION_LOST,
+        PRE_FAILOVER,
+        POST_FAILOVER
+    };
+
+    private Connection _con;
+
+    private ConnectionEventType _eventType;
+
+    private Exception _exception;
+
+    public ConnectionEvent(Connection con, ConnectionEventType eventType, Exception exp)
+    {
+        _con = con;
+        _eventType = eventType;
+        _exception = exp;
+    }
+
+    public Connection getConnection()
+    {
+        return _con;
+    }
+
+    public ConnectionEventType getEventType()
+    {
+        return _eventType;
+    }
+
+    public Exception getException()
+    {
+        return _exception;
+    }
 }

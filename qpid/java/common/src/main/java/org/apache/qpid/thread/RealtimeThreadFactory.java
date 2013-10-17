@@ -23,6 +23,7 @@ package org.apache.qpid.thread;
 
 import java.lang.reflect.Constructor;
 
+@SuppressWarnings("rawtypes")
 public class RealtimeThreadFactory implements ThreadFactory
 {
     private final LoggingUncaughtExceptionHandler _loggingUncaughtExceptionHandler = new LoggingUncaughtExceptionHandler();
@@ -32,6 +33,7 @@ public class RealtimeThreadFactory implements ThreadFactory
     private Constructor priorityParameterConstructor;
     private int defaultRTThreadPriority = 20;
     
+    @SuppressWarnings("unchecked")
     public RealtimeThreadFactory() throws Exception
     {
         defaultRTThreadPriority = Integer.getInteger("qpid.rt_thread_priority",20);
@@ -69,4 +71,15 @@ public class RealtimeThreadFactory implements ThreadFactory
         return thread;
     }
 
+    public Thread newThread(Runnable r)
+    {
+        try
+        {
+            return createThread(r,defaultRTThreadPriority);
+        }
+        catch (Exception e)
+        {
+            throw new Error("Unnable to create new thread", e);
+        }
+    }
 }

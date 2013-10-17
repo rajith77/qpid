@@ -27,6 +27,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 
 import javax.jms.ConnectionConsumer;
@@ -46,6 +48,8 @@ import javax.jms.TopicConnection;
 import javax.jms.TopicSession;
 
 import org.apache.qpid.amqp_0_10.jms.Connection;
+import org.apache.qpid.amqp_0_10.jms.ConnectionEvent;
+import org.apache.qpid.amqp_0_10.jms.ConnectionEvent.ConnectionEventType;
 import org.apache.qpid.amqp_0_10.jms.ConnectionFailedException;
 import org.apache.qpid.amqp_0_10.jms.FailoverManager;
 import org.apache.qpid.amqp_0_10.jms.FailoverUnsuccessfulException;
@@ -58,6 +62,7 @@ import org.apache.qpid.client.AMQConnectionURL;
 import org.apache.qpid.client.JmsNotImplementedException;
 import org.apache.qpid.client.transport.ClientConnectionDelegate;
 import org.apache.qpid.configuration.ClientProperties;
+import org.apache.qpid.thread.Threading;
 import org.apache.qpid.transport.ClientSession;
 import org.apache.qpid.transport.ClientSessionFactory;
 import org.apache.qpid.transport.ClientSessionListener;
@@ -130,6 +135,8 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
 
     private volatile ExceptionListener _exceptionListener;
 
+    private ExecutorService _executor = Executors.newSingleThreadExecutor(Threading.getThreadFactory());
+
     public ConnectionImpl(String url) throws JMSException, URLSyntaxException
     {
         this(new AMQConnectionURL(url));
@@ -169,12 +176,8 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                         _logger.debug("Successfully connected to host : " + settings.getHost() + " port: "
                                 + settings.getPort());
                     }
-
-                    for (org.apache.qpid.amqp_0_10.jms.ConnectionListener l : _listeners)
-                    {
-                        l.protocolConnectionCreated(this);
-                    }
-
+                    notifyConnectionEvent(ConnectionEventType.PROTOCOL_CONNECTION_CREATED);
+                    
                     _state = State.STOPPED;
                 }
                 catch (ProtocolVersionException pe)
@@ -238,10 +241,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             {
                 _failoverManager.init(this);
                 _failoverManager.connect();
-                for (org.apache.qpid.amqp_0_10.jms.ConnectionListener l : _listeners)
-                {
-                    l.opened(this);
-                }
+                notifyConnectionEvent(ConnectionEventType.OPENED);
             }
             SessionImpl ssn = new SessionImpl(this, ackMode);
             _sessions.add(ssn);
@@ -304,10 +304,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             {
                 _failoverManager.init(this);
                 _failoverManager.connect();
-                for (org.apache.qpid.amqp_0_10.jms.ConnectionListener l : _listeners)
-                {
-                    l.opened(this);
-                }
+                notifyConnectionEvent(ConnectionEventType.OPENED);
             }
 
             if (_state == State.STOPPED)
@@ -322,10 +319,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 _dispatchManager.start();
             }
 
-            for (org.apache.qpid.amqp_0_10.jms.ConnectionListener l : _listeners)
-            {
-                l.started(this);
-            }
+            notifyConnectionEvent(ConnectionEventType.STARTED);
 
             _lock.notifyAll();
         }
@@ -347,14 +341,12 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 {
                     session.stop();
                 }
+
+                notifyConnectionEvent(ConnectionEventType.STOPPED);
             }
             else if (_state == State.UNCONNECTED)
             {
                 _state = State.STOPPED;
-            }
-            for (org.apache.qpid.amqp_0_10.jms.ConnectionListener l : _listeners)
-            {
-                l.stopped(this);
             }
 
             _lock.notifyAll();
@@ -402,10 +394,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         }
         _exception = exception;
 
-        for (org.apache.qpid.amqp_0_10.jms.ConnectionListener l : _listeners)
-        {
-            l.exception(this, exception);
-        }
+        notifyConnectionEvent(ConnectionEventType.EXCEPTION, exception);
     }
 
     @Override
@@ -424,16 +413,17 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
             {
                 try
                 {
+                    notifyConnectionEvent(ConnectionEventType.PROTOCOL_CONNECTION_LOST);
                     _failoverInProgress.setValueAndNotify(true);
                     FailoverStatus status = FailoverStatus.SUCCESSFUL;
-                    // l.protocolConnectionLost(this);
+                    notifyConnectionEvent(ConnectionEventType.PRE_FAILOVER);
 
                     State prevState = _state;
                     _state = State.UNCONNECTED;
                     try
                     {
                         _logger.warn("Executing pre failover routine");
-                        // .preFailover(this);
+                        notifyConnectionEvent(ConnectionEventType.PRE_FAILOVER);
                         preFailover();
                     }
                     catch (JMSException e)
@@ -470,7 +460,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                         {
                             _logger.warn("Reconnection succesfull, Executing post failover routine");
                             postFailover();
-                            // l.postFailover(this);
+                            notifyConnectionEvent(ConnectionEventType.POST_FAILOVER);
                         }
                         catch (ConnectionFailedException e)
                         {
@@ -521,13 +511,18 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
         // the state will never change.
         if (_state == State.CLOSED && _exceptionListener != null)
         {
-            _exceptionListener.onException(closedException);
+            final JMSException exp = ExceptionHelper.toJMSException("Connection error", closedException);
+            Runnable r = new Runnable()
+            {
+                public void run()
+                {
+                    _exceptionListener.onException(exp);
+                }
+            };
+            _executor.execute(r);
         }
 
-        for (org.apache.qpid.amqp_0_10.jms.ConnectionListener l : _listeners)
-        {
-            l.closed(this);
-        }
+        notifyConnectionEvent(ConnectionEventType.CLOSED);
     }
 
     // -----------------------------------------
@@ -583,7 +578,7 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                         _amqpConnection.close();
                     }
                 }
-
+                _executor.shutdown();
             }
             _lock.notifyAll();
         }
@@ -795,8 +790,29 @@ public class ConnectionImpl implements Connection, TopicConnection, QueueConnect
                 _logger.warn(e, "Error deleting temp queue " + dest == null ? "" : ":" + dest.getQueueName());
             }
         }
+        ssn.close();
     }
 
+    void notifyConnectionEvent(ConnectionEventType type)
+    {
+        notifyConnectionEvent(type, null);
+    }
+
+    void notifyConnectionEvent(ConnectionEventType type, Exception exp)
+    {
+        final ConnectionEvent event = new ConnectionEvent(this, type, exp);
+        Runnable r = new Runnable()
+        {
+            public void run()
+            {
+                for (org.apache.qpid.amqp_0_10.jms.ConnectionListener l : _listeners)
+                {
+                    l.connectionEvent(event);
+                }
+            }
+        };
+        _executor.execute(r);
+    }
     // ----------------------------------------
     // SessionListener
     // -----------------------------------------
