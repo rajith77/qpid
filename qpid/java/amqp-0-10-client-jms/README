@@ -1,0 +1,27 @@
+This module contains a JMS implementation over the AMQP 0-10 protocol.
+
+You could use one of the following methods to use the new client.
+
+1. JNDI file. (Recommended approach)
+=====================================
+You need to use the correct Context factory.
+
+java.naming.factory.initial = org.apache.qpid.amqp_0_10.jms.impl.jndi.PropertiesFileInitialContextFactory
+
+The rest of the JNDI file is the same as what was before.
+
+
+2. Direct use from code (not recommended).
+===========================================
+Use org.apache.qpid.amqp_0_10.jms.impl.ConnectionImpl to directly initiate a connection.
+The old connection URL is supported.
+
+
+General usage guidelines.
+=========================
+1. Once you obtain a connection, you should use pure JMS interfaces.
+
+2. If you are using implementation specific classes from the old client **please change** them to use pure JMS interface methods.
+
+3. Config options from the old client is supported where it make sense.
+
