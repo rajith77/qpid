@@ -88,7 +88,7 @@ public class AddressHelper
 
     public static final String RELIABILITY = "reliability";
 
-    public static final String PRODUCER_SYNC_TIMEOUT = "producer_sync_timeout";
+    public static final String PRODUCER_SYNC_TIMEOUT = "producer-sync-timeout";
 
     private Address _address;
 
