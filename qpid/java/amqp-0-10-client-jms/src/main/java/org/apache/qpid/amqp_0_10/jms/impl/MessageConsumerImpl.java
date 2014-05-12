@@ -24,6 +24,7 @@ import static org.apache.qpid.transport.Option.BATCH;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Enumeration;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -37,6 +38,8 @@ import javax.jms.MessageListener;
 
 import org.apache.qpid.amqp_0_10.jms.impl.AddressResolution.CheckMode;
 import org.apache.qpid.amqp_0_10.jms.impl.dispatch.Dispatchable;
+import org.apache.qpid.amqp_0_10.jms.impl.message.MapMessageImpl;
+import org.apache.qpid.amqp_0_10.jms.impl.message.TextMessageImpl;
 import org.apache.qpid.transport.MessageCreditUnit;
 import org.apache.qpid.transport.MessageFlowMode;
 import org.apache.qpid.transport.Option;
@@ -98,6 +101,8 @@ public class MessageConsumerImpl implements MessageConsumer
 
     private MessageImpl _currentMsg = null;
 
+    private boolean _printMsg = Boolean.getBoolean("qpid.print_msg");
+    
     protected MessageConsumerImpl(String consumerId, SessionImpl ssn, DestinationImpl dest, String selector,
             boolean noLocal, boolean browseOnly, AcknowledgeMode ackMode) throws JMSException
     {
@@ -354,6 +359,11 @@ public class MessageConsumerImpl implements MessageConsumer
         {
             releaseMessageAndLogException(m);
             return;
+        }
+
+        if (_printMsg)
+        {
+            printMessage(m);
         }
 
         _msgDeliveryStopped.waitUntilFalse();
@@ -935,5 +945,67 @@ public class MessageConsumerImpl implements MessageConsumer
         /*
          * if(exit) { System.exit(0); }
          */
+    }
+
+    private void printMessage(MessageImpl m)
+    {
+        try
+        {
+            StringBuilder str = new StringBuilder();
+            str.append("{----------- Message -------------\n");
+            str.append("=========== Headers =============\n");
+            str.append("ID ").append(m.getJMSMessageID()).append("\n");
+            str.append("Destination ").append(m.getJMSDestination()).append("\n");
+            for(Enumeration keys = m.getPropertyNames() ; keys.hasMoreElements() ;)
+            {
+                String key = (String)keys.nextElement();
+                Object val = m.getApplicationProperty(key);
+                str.append("Property : ").append(key).append(", ");
+                if (val == null)
+                {
+                    str.append("Value : Null\n");
+                }
+                else
+                {
+                    str.append("Value class : ").append(val.getClass()).append(", ");
+                    str.append("Value : ").append(val).append("\n");
+                }
+                
+            }            
+            str.append("===========/ Headers ============\n\n");
+            str.append("============= Body ==============\n");
+            if (m instanceof MapMessageImpl)
+            {
+                MapMessageImpl map = (MapMessageImpl)m; 
+                for(Enumeration keys = map.getMapNames() ; keys.hasMoreElements() ;)
+                {
+                    String key = (String)keys.nextElement();
+                    Object val = map.getObject(key);
+                    str.append("Key : ").append(key).append(", ");
+                    if (val == null)
+                    {
+                        str.append("Value : Null\n");
+                    }
+                    else
+                    {
+                        str.append("Value class : ").append(val.getClass()).append(", ");
+                        str.append("Value : ").append(val).append("\n");
+                    }
+                    
+                }        
+            }
+            else if (m instanceof TextMessageImpl)
+            {
+                str.append(((TextMessageImpl)m).getText()).append("\n");
+            }
+            str.append("=============/ Body ==============\n");
+            str.append("-----------/ Message -------------}\n\n\n");
+            System.out.println(str.toString());
+        }
+        catch (JMSException e)
+        {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
     }
 }

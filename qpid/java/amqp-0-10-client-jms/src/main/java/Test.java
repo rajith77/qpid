@@ -26,7 +26,7 @@ public class Test
         Session ssn = con.createSession(false, Session.AUTO_ACKNOWLEDGE);
         TemporaryQueue queue = ssn.createTemporaryQueue(); // ssn.createQueue("MY_QUEUE;{create : always}");
 
-        queue.delete();
+        //queue.delete();
 
         MessageProducer prod = ssn.createProducer(queue);
         for (int i = 0; i < 5; i++)
@@ -101,7 +101,7 @@ public class Test
      */
     public static void main(String[] args) throws Exception
     {
-        Test.testExecutionExceptionHandling();
+        Test.basicSendReceive();
     }
 
 }
