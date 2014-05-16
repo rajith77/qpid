@@ -136,7 +136,7 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
             if (subject != null)
             {
                 _messageProps.getApplicationHeaders().remove(QpidMessageProperties.QPID_SUBJECT);
-                _messageProps.getApplicationHeaders().put("JMS_" + QpidMessageProperties.QPID_SUBJECT,subject);
+                _messageProps.getApplicationHeaders().put(QpidMessageProperties.JMS_STRICT_QPID_SUBJECT,subject);
             }
         }
     }
@@ -649,7 +649,7 @@ public abstract class MessageImpl implements AmqpMessage, Dispatchable<org.apach
         }
         else if (isStrictJMS && QpidMessageProperties.QPID_SUBJECT.equals(propertyName))
         {
-            return (String) getApplicationProperty("JMS_" + QpidMessageProperties.QPID_SUBJECT);
+            return (String) getApplicationProperty(QpidMessageProperties.JMS_STRICT_QPID_SUBJECT);
         }
         else
         {
